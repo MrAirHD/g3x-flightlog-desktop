@@ -46,6 +46,22 @@ Nur die App als Ordner (ohne Installer, umgeht das obige Recht) zum Ausprobieren
 npm run dist -- --dir     # -> release\win-unpacked\G3X Flugbuch.exe
 ```
 
+### macOS-Installer (.dmg) bauen
+> **Muss auf einem Mac gebaut werden** — electron-builder kann macOS-Apps nicht
+> unter Windows/Linux erzeugen. Die Konfiguration (Icon, dmg, Universal arm64+x64)
+> ist bereits im Projekt vorbereitet.
+
+```bash
+# auf einem Mac (Node.js 18+):
+npm install
+npm run dist:mac          # -> release/G3X-Flight-Log-1.0.0-arm64.dmg  (+ x64)
+```
+Die App ist **nicht signiert/notarisiert**. Beim ersten Öffnen meldet Gatekeeper
+„nicht verifizierter Entwickler“ — dann per **Rechtsklick → Öffnen** (bzw.
+*Systemeinstellungen → Datenschutz & Sicherheit → Trotzdem öffnen*) starten.
+Für eine signierte/notarisierte Version braucht es ein Apple-Developer-Konto
+(`CSC_LINK`/`APPLE_ID` als Umgebungsvariablen).
+
 *Build the installer with `npm run dist`; the NSIS setup asks for its language
 (English/German) at launch.*
 
