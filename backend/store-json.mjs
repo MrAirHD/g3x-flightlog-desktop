@@ -1,0 +1,92 @@
+// Lokaler Speicher als JSON-Datei (kein node:sqlite -> läuft in jeder
+// Electron-/Node-Version). Hält die Kurz-Zusammenfassungen im Speicher und
+// schreibt debounced auf Platte; die Roh-CSVs liegen im Archiv-Ordner.
+import { promises as fs, readFileSync, existsSync, mkdirSync } from "node:fs";
+import path from "node:path";
+
+export function makeJsonStore(file) {
+  mkdirSync(path.dirname(file), { recursive: true });
+  let data = { flights: {}, errors: [] };
+  if (existsSync(file)) {
+    try { data = JSON.parse(readFileSync(file, "utf8")); }
+    catch { /* korrupt -> frisch beginnen; aus Archiv rekonstruierbar */ }
+  }
+  data.flights ||= {};
+  data.errors ||= [];
+
+  let saveTimer = null, saving = false, dirty = false;
+  async function persist() {
+    if (saving) { dirty = true; return; }
+    saving = true; dirty = false;
+    try { await fs.writeFile(file + ".tmp", JSON.stringify(data)); await fs.rename(file + ".tmp", file); }
+    catch (e) { console.error("Store speichern fehlgeschlagen:", e.message); }
+    finally { saving = false; if (dirty) await persist(); }
+  }
+  function save() { clearTimeout(saveTimer); saveTimer = setTimeout(persist, 250); }
+  async function flush() { clearTimeout(saveTimer); await persist(); }
+
+  const arr = () => Object.values(data.flights);
+
+  return {
+    hasHash: (hash) => arr().some(f => f.hash === hash),
+    get: (id) => data.flights[id],
+    remove: (id) => { delete data.flights[id]; save(); },
+    setOverride: (id, val) => { if (data.flights[id]) { data.flights[id].typeOverride = val || null; save(); } },
+    addError: (name, reason) => { data.errors.unshift({ path: name, reason, at: Date.now() });
+      if (data.errors.length > 500) data.errors.length = 500; save(); },
+    errors: () => data.errors.slice(0, 200),
+
+    add(rec) {
+      data.flights[rec.id] = {
+        id: rec.id, hash: rec.hash, name: rec.name,
+        summary: rec.summary, typeOverride: rec.typeOverride ?? null,
+        archivedPath: rec.archivedPath, addedAt: Date.now(),
+      };
+      save();
+    },
+
+    list({ type = "all", month = "all", warnOnly = false, sort = "desc", offset = 0, limit = 300 } = {}) {
+      let rows = arr().filter(f => {
+        const s = f.summary;
+        if (type !== "all" && (f.typeOverride || s.type) !== type) return false;
+        if (month !== "all" && !(s.date || "").startsWith(month)) return false;
+        if (warnOnly && !s.nCrit && !s.nWarn) return false;
+        return true;
+      });
+      const dir = sort === "asc" ? 1 : -1;
+      rows.sort((a, b) => (a.summary.startTs - b.summary.startTs || String(a.id).localeCompare(String(b.id))) * dir);
+      const total = rows.length;
+      const flights = rows.slice(offset, offset + limit).map(f => ({
+        id: f.id, name: f.name, typeOverride: f.typeOverride || null, summary: f.summary,
+      }));
+      return { total, flights };
+    },
+
+    stats() {
+      const rows = arr();
+      const agg = { total: rows.length, flight: 0, ground: 0, panel: 0,
+        runSecs: 0, dist: 0, nCrit: 0, nWarn: 0, maxOilT: null, maxRpm: null, maxAlt: null,
+        dateMin: null, dateMax: null };
+      for (const f of rows) {
+        const s = f.summary, t = f.typeOverride || s.type;
+        agg[t] = (agg[t] || 0) + 1;
+        agg.runSecs += s.runSecs || 0; agg.dist += s.dist || 0;
+        agg.nCrit += s.nCrit || 0; agg.nWarn += s.nWarn || 0;
+        if (s.maxOilT != null) agg.maxOilT = Math.max(agg.maxOilT ?? -1e9, s.maxOilT);
+        if (s.maxRpm != null)  agg.maxRpm  = Math.max(agg.maxRpm ?? -1e9, s.maxRpm);
+        if (s.maxAlt != null)  agg.maxAlt  = Math.max(agg.maxAlt ?? -1e9, s.maxAlt);
+        if (s.date) { if (!agg.dateMin || s.date < agg.dateMin) agg.dateMin = s.date;
+                      if (!agg.dateMax || s.date > agg.dateMax) agg.dateMax = s.date; }
+      }
+      return agg;
+    },
+
+    months() {
+      return [...new Set(arr().map(f => (f.summary.date || "").slice(0, 7)).filter(Boolean))].sort().reverse();
+    },
+
+    // Beim Ordnerwechsel: alle Zusammenfassungen verwerfen (Archiv liefert neu).
+    clearAll() { data = { flights: {}, errors: [] }; save(); },
+    flush,
+  };
+}

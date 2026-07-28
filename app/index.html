@@ -1,0 +1,1295 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>G3X Flugbuch & Motoranalyse — Rotax 915 iS</title>
+<link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
+<script src="/vendor/leaflet/leaflet.js"></script>
+<style>
+:root{
+  color-scheme: light;
+  --page:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --axis:#c3c2b7; --border:rgba(11,11,11,.10);
+  --s1:#2a78d6; --s2:#008300; --s3:#e87ba4; --s4:#eda100; --s5:#1baf7a; --s6:#eb6834; --s7:#4a3aa7; --s8:#e34948;
+  --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b;
+  --good-wash:rgba(12,163,12,.07); --warn-wash:rgba(250,178,25,.14); --crit-wash:rgba(208,59,59,.12);
+  --cold-wash:rgba(42,120,214,.08);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    color-scheme: dark;
+    --page:#0d0d0d; --surface:#1a1a19; --ink:#ffffff; --ink2:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,.10);
+    --s1:#3987e5; --s2:#008300; --s3:#d55181; --s4:#c98500; --s5:#199e70; --s6:#d95926; --s7:#9085e9; --s8:#e66767;
+    --good-wash:rgba(12,163,12,.10); --warn-wash:rgba(250,178,25,.10); --crit-wash:rgba(208,59,59,.14);
+    --cold-wash:rgba(57,135,229,.10);
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--ink);
+  font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+.wrap{max-width:1180px;margin:0 auto;padding:24px 20px 60px}
+header.top{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 16px;margin-bottom:4px}
+header.top h1{font-size:22px;margin:0}
+header.top .sub{color:var(--ink2)}
+#meta{color:var(--ink2);font-size:13px;margin:2px 0 18px}
+#drop{border:2px dashed var(--axis);border-radius:12px;background:var(--surface);
+  padding:34px 24px;text-align:center;color:var(--ink2);cursor:pointer;transition:border-color .15s}
+#drop.hover{border-color:var(--s1);color:var(--ink)}
+#drop b{color:var(--ink)}
+#drop .small{font-size:13px;color:var(--muted);margin-top:6px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px 20px;margin-top:18px}
+.card h2{font-size:16px;margin:0 0 12px}
+details.section{background:none;border:0;padding:0;margin-top:26px}
+details.section>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:10px;
+  font-size:18px;font-weight:700;padding:4px 2px;user-select:none}
+details.section>summary::before{content:"▸";color:var(--muted);font-size:14px;transition:transform .15s}
+details.section[open]>summary::before{transform:rotate(90deg)}
+details.section>summary .count{font-size:13px;font-weight:400;color:var(--muted)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:10px}
+.tile{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 12px}
+.tile .name{font-size:12px;color:var(--ink2);display:flex;align-items:center;gap:6px}
+.tile .dot{width:9px;height:9px;border-radius:50%;flex:none}
+.tile .val{font-size:21px;font-weight:600;margin:2px 0 0}
+.tile .val .unit{font-size:12px;font-weight:400;color:var(--muted)}
+.tile .mm{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.badge{display:inline-flex;align-items:center;gap:6px;font-size:13px;padding:2px 10px;border-radius:999px;border:1px solid var(--border)}
+.badge .dot{width:9px;height:9px;border-radius:50%}
+ul.warnlist{margin:0;padding-left:0;list-style:none}
+ul.warnlist li{padding:7px 0;border-top:1px solid var(--grid);display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+ul.warnlist li:first-child{border-top:0}
+ul.warnlist .t{color:var(--muted);font-variant-numeric:tabular-nums;font-size:13px;flex:none;width:130px}
+ul.warnlist .ic{flex:none}
+.allok{color:var(--ink2)}
+.chart-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px;margin-bottom:4px}
+.chart-head h2{margin:0}
+.chart-head .stats{color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
+.legend{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:13px;color:var(--ink2);margin:6px 0 0}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:14px;height:3px;border-radius:2px;display:inline-block}
+.zonenote{font-size:12px;color:var(--muted);margin-top:6px}
+.chartbox{position:relative}
+.chartbox svg{display:block;width:100%;height:auto}
+.tip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--border);
+  border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,.15);padding:7px 10px;font-size:12.5px;
+  min-width:130px;display:none;z-index:1000}
+.tip .tt{color:var(--muted);margin-bottom:3px;font-variant-numeric:tabular-nums}
+.tip .row{display:flex;justify-content:space-between;gap:14px;font-variant-numeric:tabular-nums}
+.tip .row i{width:10px;height:10px;border-radius:3px;display:inline-block;margin-right:5px;vertical-align:-1px}
+table.limits{border-collapse:collapse;width:100%;font-size:13.5px}
+table.limits th,table.limits td{padding:6px 10px;text-align:left;border-top:1px solid var(--grid);font-variant-numeric:tabular-nums}
+table.limits thead th{border-top:0;color:var(--ink2);font-weight:600}
+table.limits td.c{white-space:nowrap}
+.src{font-size:12.5px;color:var(--muted);margin-top:10px}
+.src a{color:var(--s1)}
+.statgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px}
+.statcol{border:1px solid var(--border);border-radius:10px;padding:10px 14px;min-width:0}
+.statcol h3{font-size:13.5px;margin:0 0 6px}
+.statcol ul{margin:0;padding:0;list-style:none;font-size:12.5px;max-height:190px;overflow-y:auto}
+.statcol li{display:flex;gap:10px;padding:2px 0;border-top:1px dashed var(--grid)}
+.statcol li:first-child{border-top:0}
+.statcol .t{color:var(--muted);font-variant-numeric:tabular-nums;flex:none;width:66px}
+.statcol .more{color:var(--muted);font-style:italic}
+.emptycols{font-size:12.5px;color:var(--muted);line-height:1.7}
+.emptycols code{background:var(--page);border:1px solid var(--grid);border-radius:5px;padding:1px 6px;margin:0 2px;font-size:11.5px;white-space:nowrap}
+.toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:16px}
+.toolbar .spacer{flex:1}
+button.btn{display:inline-flex;align-items:center;gap:8px;background:var(--surface);
+  color:var(--ink);border:1px solid var(--axis);border-radius:8px;
+  padding:8px 14px;font:600 13.5px system-ui,sans-serif;cursor:pointer;white-space:nowrap}
+button.btn:hover{border-color:var(--s1);color:var(--s1)}
+button.btn:disabled{opacity:.4;cursor:default}
+button.btn.danger:hover{border-color:var(--crit);color:var(--crit)}
+select.flightsel{background:var(--surface);color:var(--ink);border:1px solid var(--axis);
+  border-radius:8px;padding:8px 10px;font:600 13.5px system-ui,sans-serif;max-width:340px}
+/* Flugliste (Übersicht) — kompakt, skaliert auf viele Einträge */
+.filters{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:0 0 10px;font-size:13px}
+.filters .spacer{flex:1}
+.filters .chk{display:inline-flex;align-items:center;gap:6px;color:var(--ink2);cursor:pointer;white-space:nowrap}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{border:1px solid var(--axis);border-radius:999px;padding:4px 12px;cursor:pointer;
+  background:var(--surface);color:var(--ink2);font:600 12.5px system-ui,sans-serif;white-space:nowrap}
+.chip:hover{border-color:var(--s1)}
+.chip.active{background:var(--s1);border-color:var(--s1);color:#fff}
+ul.flights{margin:0;padding:0;list-style:none;font-variant-numeric:tabular-nums}
+ul.flights li{display:flex;align-items:center;gap:10px;padding:5px 8px;border-top:1px solid var(--grid);
+  cursor:pointer;font-size:13px;line-height:1.35}
+ul.flights li:first-child{border-top:0}
+ul.flights li:hover{background:var(--page)}
+.fl-type{flex:none;width:20px;text-align:center}
+.fl-when{flex:none;width:158px;white-space:nowrap}
+.fl-when .d{font-weight:600}
+.fl-when .t{color:var(--muted)}
+.fl-facts{flex:1;display:flex;flex-wrap:wrap;gap:2px 14px;color:var(--ink2);min-width:0;overflow:hidden}
+.fl-facts b{color:var(--ink)}
+.fl-badges{flex:none;display:flex;gap:5px}
+.fl-badges .badge{font-size:11.5px;padding:1px 8px}
+.fl-x{flex:none;border:0;background:none;color:var(--muted);font-size:14px;cursor:pointer;padding:2px 7px;border-radius:6px}
+.fl-x:hover{color:var(--crit);background:var(--page)}
+.mapbox{position:relative;height:480px;border-radius:8px;overflow:hidden;background:var(--page)}
+.mapbox.small{height:380px}
+.leaflet-container{font:12px/1.4 system-ui,sans-serif}
+#overview,#report{display:none}
+@media print{
+  #drop,.toolbar,.tip{display:none!important}
+  body{background:#fff;font-size:13px}
+  .wrap{max-width:none;padding:0}
+  .card{break-inside:avoid;border-color:#ccc;margin-top:10px;padding:12px 14px}
+  .tiles{grid-template-columns:repeat(4,1fr)}
+  header.top h1{font-size:18px}
+  details.section>summary::before{content:""}
+}
+@page{margin:14mm 12mm}
+#login{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:var(--page);z-index:2000}
+.loginbox{background:var(--surface);border:1px solid var(--border);border-radius:14px;
+  padding:28px 30px;width:min(360px,92vw);display:flex;flex-direction:column;gap:12px;box-shadow:0 8px 30px rgba(0,0,0,.15)}
+.loginbox h1{margin:0;font-size:20px}
+.loginbox .sub{margin:0;color:var(--ink2);font-size:13.5px}
+.loginbox input{padding:10px 12px;border:1px solid var(--axis);border-radius:8px;background:var(--page);color:var(--ink);font-size:15px}
+.loginbox input:focus{outline:none;border-color:var(--s1)}
+button.btn.primary{background:var(--s1);border-color:var(--s1);color:#fff;justify-content:center}
+button.btn.primary:hover{color:#fff;filter:brightness(1.05)}
+.loginbox .err{color:var(--crit);font-size:13px;min-height:16px}
+#desktopBar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 4px;padding:8px 12px;
+  background:var(--surface);border:1px solid var(--border);border-radius:10px;font-size:13px}
+#desktopBar .db-label{color:var(--ink2)}
+#desktopBar code{background:var(--page);border:1px solid var(--grid);border-radius:6px;padding:2px 8px;
+  font-size:12px;max-width:60ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#desktopBar .btn{padding:5px 12px}
+#desktopBar .spacer{flex:1}
+#toasts{position:fixed;right:16px;bottom:16px;z-index:3000;display:flex;flex-direction:column;gap:10px;max-width:min(420px,92vw)}
+.toast{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--s1);
+  border-radius:10px;padding:11px 14px;box-shadow:0 6px 24px rgba(0,0,0,.18);font-size:13.5px;color:var(--ink);
+  animation:toastin .18s ease-out}
+.toast.ok{border-left-color:var(--good)} .toast.warn{border-left-color:var(--warn)} .toast.err{border-left-color:var(--crit)}
+.toast .tt{font-weight:600;margin-bottom:2px}
+.toast .msg{color:var(--ink2);white-space:pre-line}
+.toast.leaving{opacity:0;transform:translateY(6px);transition:opacity .25s,transform .25s}
+@keyframes toastin{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+</style>
+</head>
+<body>
+<div id="toasts"></div>
+<div id="login">
+  <form id="loginForm" class="loginbox">
+    <h1>G3X Flugbuch</h1>
+    <p class="sub">Bitte anmelden</p>
+    <input type="password" id="loginPw" placeholder="Passwort" autocomplete="current-password" autofocus>
+    <button type="submit" class="btn primary">Anmelden</button>
+    <div id="loginErr" class="err"></div>
+  </form>
+</div>
+
+<div class="wrap" id="app" style="display:none">
+  <header class="top">
+    <h1>G3X Flugbuch & Motoranalyse</h1>
+    <span class="sub">Rotax 915 iS · Grenzwerte lt. Operators Manual OM-915 i A</span>
+    <span class="spacer" style="flex:1"></span>
+    <button class="btn" id="logoutBtn" style="display:none">Abmelden</button>
+  </header>
+  <div id="meta"></div>
+
+  <div id="desktopBar" style="display:none">
+    <span class="db-label">Datenordner:</span>
+    <code id="dbPath" title=""></code>
+    <button class="btn" id="dbChange">Ordner ändern</button>
+    <button class="btn" id="dbOpen">Ordner öffnen</button>
+  </div>
+
+  <div id="drop" tabindex="0">
+    <b>G3X-Logdateien (CSV) hierher ziehen</b> oder klicken zum Auswählen — auch mehrere auf einmal
+    <div class="small">Die Dateien werden zum Server hochgeladen, dort dem Archiv hinzugefügt und erscheinen nach dem Einlesen in der Übersicht.</div>
+    <input type="file" id="file" accept=".csv,text/csv" multiple style="display:none">
+  </div>
+
+  <!-- ============ Übersicht ============ -->
+  <div id="overview">
+    <div class="card">
+      <h2>Übersicht</h2>
+      <div class="tiles" id="ovTiles"></div>
+    </div>
+    <div class="card" id="ovMapCard">
+      <div class="chart-head"><h2>Alle Flüge</h2><span class="stats" id="ovMapStats"></span></div>
+      <div class="mapbox small" id="ovMap"></div>
+      <div class="zonenote">Klick auf einen Track öffnet den Flug. Kartendaten © OpenStreetMap-Mitwirkende.</div>
+    </div>
+    <div class="card">
+      <div class="chart-head"><h2>Zeitleiste</h2><span class="stats" id="flCount"></span></div>
+      <div class="filters">
+        <div class="chips" id="typeChips"></div>
+        <select class="flightsel" id="monthSel"></select>
+        <label class="chk"><input type="checkbox" id="warnOnly"> nur mit Warnungen</label>
+        <span class="spacer"></span>
+        <button class="btn" id="sortBtn"></button>
+      </div>
+      <ul class="flights" id="flightList"></ul>
+      <div class="toolbar" style="margin-top:12px">
+        <button class="btn" id="moreBtn" style="display:none"></button>
+        <span class="spacer"></span>
+        <button class="btn" id="rescanBtn">🔄&nbsp;Eingangsordner neu einlesen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ Detailbericht ============ -->
+  <div id="report">
+    <div class="toolbar">
+      <button class="btn" id="backBtn">← Übersicht</button>
+      <button class="btn" id="prevBtn">◀</button>
+      <select class="flightsel" id="flightSel"></select>
+      <button class="btn" id="nextBtn">▶</button>
+      <select class="flightsel" id="typeSel" title="Klassifizierung dieses Logs (manuell übersteuerbar)"></select>
+      <span class="spacer"></span>
+      <button class="btn" id="fullBtn"></button>
+      <button class="btn" onclick="window.print()">🖨&nbsp;Als PDF drucken</button>
+    </div>
+    <div class="card" id="summaryCard">
+      <h2>Übersicht</h2>
+      <div class="tiles" id="tiles"></div>
+    </div>
+    <div class="card">
+      <h2>Grenzwert-Überschreitungen</h2>
+      <div id="warnings"></div>
+    </div>
+    <div class="card">
+      <h2>CAS-Meldungen (G3X)</h2>
+      <div id="cas"></div>
+    </div>
+    <div id="sections"></div>
+    <div class="card">
+      <h2>Referenzwerte Rotax 915 iS</h2>
+      <div style="overflow-x:auto"><table class="limits" id="limitsTable"></table></div>
+      <div class="src">Quelle: BRP-Rotax <a href="https://sportflyingusa.com/wp-content/uploads/2021/02/OM_915-OPS-MANUAL-2021_R2-1.pdf">Operators Manual OM-915 i A Series</a>, Kap. 2.1 (Ed. 2020, Rev. 2). Mit „abgeleitet“ markierte Zwischenstufen sind keine offiziellen Rotax-Limits, sondern Vorwarnbereiche dieser Auswertung. Maßgeblich sind immer das aktuelle Operators Manual und das Flughandbuch.</div>
+    </div>
+    <div class="card">
+      <h2>Nicht dargestellte Spalten</h2>
+      <div class="emptycols" id="emptyCols"></div>
+    </div>
+  </div>
+</div>
+
+<script src="/g3x-core.js"></script>
+<script>
+"use strict";
+if (typeof document !== "undefined") (function(){
+
+const $ = s => document.querySelector(s);
+const drop = $("#drop"), fileInp = $("#file");
+
+/* HTML-Escaping für alle aus der CSV stammenden Strings, die per innerHTML in
+   die Seite geschrieben werden (Feldwerte, Spaltennamen, Datum, CAS-Texte …) —
+   verhindert Stored XSS über manipulierte Logdateien. */
+const ESC = { "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" };
+function esc(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, c => ESC[c]); }
+
+/* Toast statt Browser-Dialog */
+function toast(title, msg = "", type = "ok", ms = 5000){
+  const box = $("#toasts");
+  const t = document.createElement("div");
+  t.className = "toast " + type;
+  t.innerHTML = `<div class="tt"></div>` + (msg ? `<div class="msg"></div>` : "");
+  t.querySelector(".tt").textContent = title;
+  if (msg) t.querySelector(".msg").textContent = msg;
+  box.appendChild(t);
+  const kill = () => { t.classList.add("leaving"); setTimeout(() => t.remove(), 260); };
+  t.addEventListener("click", kill);
+  setTimeout(kill, ms);
+}
+const svgNS = "http://www.w3.org/2000/svg";
+const STATUS_ICON = { warn:"⚠️", crit:"⛔" };
+const WASH = { good:"var(--good-wash)", warn:"var(--warn-wash)", crit:"var(--crit-wash)", cold:"var(--cold-wash)" };
+const TRACK_COLORS = ["#2a78d6","#008300","#e87ba4","#eda100","#1baf7a","#eb6834","#4a3aa7","#e34948"];
+/* Effektiver Typ: manuelle Übersteuerung geht vor Automatik */
+const flType = fl => fl.typeOverride || fl.summary.type;
+const flTM = fl => TYPE_META[flType(fl)] || TYPE_META.panel;
+
+/* ---------- API-Anbindung (Server ist die Datenquelle) ---------- */
+async function api(path, opts){
+  const r = await fetch(path, { credentials:"same-origin", ...opts });
+  if (r.status === 401){ showLogin(); throw new Error("nicht angemeldet"); }
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  const ct = r.headers.get("content-type") || "";
+  return ct.includes("application/json") ? r.json() : r.text();
+}
+
+/* ---------- Zustand ---------- */
+const state = { flights: [], current: -1, sortAsc: false, fullLog: false,
+                filter: { type:"all", month:"all", warnOnly:false }, shown: 300 };
+let activeMaps = [];
+let pendingInits = [];
+function runPendingInits(){
+  const list = pendingInits; pendingInits = [];
+  requestAnimationFrame(() => list.forEach(f => { try{ f(); }catch(e){ console.error(e); } }));
+}
+function destroyMaps(){
+  for (const m of activeMaps){ try{ m.remove(); }catch(e){} }
+  activeMaps = [];
+}
+
+/* ---------- Login ---------- */
+function showLogin(){ $("#login").style.display = "flex"; $("#app").style.display = "none"; }
+function hideLogin(){ $("#login").style.display = "none"; $("#app").style.display = ""; }
+$("#loginForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  $("#loginErr").textContent = "";
+  try {
+    const r = await fetch("/api/login", { method:"POST", credentials:"same-origin",
+      headers:{ "content-type":"application/json" }, body: JSON.stringify({ password: $("#loginPw").value }) });
+    if (!r.ok){ $("#loginErr").textContent = "Falsches Passwort."; return; }
+    $("#loginPw").value = "";
+    hideLogin(); boot();
+  } catch { $("#loginErr").textContent = "Anmeldung fehlgeschlagen."; }
+});
+$("#logoutBtn").addEventListener("click", async () => {
+  try { await fetch("/api/logout", { method:"POST", credentials:"same-origin" }); } catch {}
+  showLogin();
+});
+
+/* ---------- Upload per Drag&drop (Ergänzung zum Ordner-Scan) ---------- */
+drop.addEventListener("click", () => fileInp.click());
+drop.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("hover"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("hover"));
+drop.addEventListener("drop", e => {
+  e.preventDefault(); drop.classList.remove("hover");
+  if (e.dataTransfer.files.length) addFiles([...e.dataTransfer.files]);
+});
+fileInp.addEventListener("change", () => { if (fileInp.files.length) addFiles([...fileInp.files]); fileInp.value = ""; });
+
+async function addFiles(files){
+  const fd = new FormData();
+  let n = 0;
+  for (const f of files){ if (f.name.toLowerCase().endsWith(".csv")){ fd.append("file", f); n++; } }
+  if (!n){ toast("Keine CSV ausgewählt", "Bitte G3X-Logdateien (.csv) wählen.", "warn"); return; }
+  const prev = drop.innerHTML;
+  drop.innerHTML = `<b>${n} Datei(en) werden hochgeladen …</b>`;
+  try {
+    const res = await api("/api/upload", { method:"POST", body: fd });
+    const c = res.counts || { new:0, dup:0, error:0 };
+    await refresh();
+    reportScan(c, `${res.saved} Datei(en) hochgeladen`);
+  } catch(err){ toast("Upload fehlgeschlagen", err.message, "err", 8000); }
+  finally { drop.innerHTML = prev; }
+}
+
+// Ergebnis eines Scans/Uploads als Toast aufbereiten (inkl. echter Fehlergründe).
+function reportScan(c, prefix){
+  const parts = [];
+  if (c.new)   parts.push(`${c.new} neu eingelesen`);
+  if (c.dup)   parts.push(`${c.dup} Duplikat(e) übersprungen`);
+  if (c.error) parts.push(`${c.error} Fehler`);
+  const summary = parts.join(" · ") || "nichts Neues gefunden";
+  const msgs = (c.messages || []).slice(0, 4).join("\n");
+  const type = c.error ? "err" : c.new ? "ok" : "warn";
+  toast(prefix, summary + (msgs ? "\n\n" + msgs : ""), type, c.error ? 12000 : 6000);
+}
+
+/* ---------- Flüge vom Server laden ---------- */
+function sortFlights(){
+  state.flights.sort((a,b) => (a.summary.startTs - b.summary.startTs || a.summary.start.localeCompare(b.summary.start)) * (state.sortAsc ? 1 : -1));
+}
+async function loadAll(){
+  const out = [];
+  const PAGE = 2000;
+  for (let offset = 0; ; offset += PAGE){
+    const res = await api(`/api/flights?limit=${PAGE}&offset=${offset}`);
+    for (const f of res.flights)
+      out.push({ id: f.id, name: f.name, parsed: null, summary: f.summary, typeOverride: f.typeOverride || null });
+    if (offset + PAGE >= res.total || !res.flights.length) break;
+  }
+  state.flights = out;
+  sortFlights();
+}
+async function refresh(){
+  const curId = state.current >= 0 ? state.flights[state.current]?.id : null;
+  await loadAll();
+  if (curId){
+    const idx = state.flights.findIndex(fl => fl.id === curId);
+    if (idx >= 0){ state.current = idx; renderDetail(state.flights[idx]); return; }
+  }
+  showOverview();
+}
+
+// Desktop (Electron): Statusleiste mit Datenordner + Buttons.
+async function initDesktopBar(){
+  if (!window.desktop || !window.desktop.isDesktop) return;
+  const bar = $("#desktopBar");
+  try {
+    const info = await window.desktop.getInfo();
+    $("#dbPath").textContent = info.dataDir;
+    $("#dbPath").title = info.dataDir;
+    bar.style.display = "flex";
+    const small = drop.querySelector(".small");
+    if (small) small.textContent = "Die Dateien werden in den Datenordner übernommen und dort archiviert. Du kannst CSVs auch direkt in den Unterordner „ingest“ legen.";
+  } catch {}
+  $("#dbChange").onclick = () => window.desktop.chooseFolder();   // Backend startet neu + Fenster lädt neu
+  $("#dbOpen").onclick = () => window.desktop.openFolder();
+}
+
+async function boot(){
+  let me;
+  try { me = await (await fetch("/api/me", { credentials:"same-origin" })).json(); }
+  catch { showLogin(); return; }
+  if (me.needsPassword && !me.authed){ showLogin(); return; }
+  hideLogin();
+  $("#logoutBtn").style.display = me.needsPassword ? "" : "none";
+  await initDesktopBar();
+  try {
+    const st = await api("/api/status");
+    if (st && st.archiveWritable === false)
+      toast("Archiv nicht beschreibbar", "Der Container kann nicht ins Synology-Archiv schreiben — Uploads/Ordner werden nicht eingelesen. Rechte am Mount prüfen (Container läuft als uid 1000).", "err", 15000);
+  } catch {}
+  const openHash = location.hash.match(/^#f=(.+)/);   // vor showOverview sichern
+  try { await loadAll(); } catch(e){ console.error(e); return; }
+  showOverview();
+  if (openHash){ const idx = state.flights.findIndex(fl => fl.id === decodeURIComponent(openHash[1])); if (idx >= 0) showFlight(idx); }
+}
+boot();
+
+/* ---------- Ansichten ---------- */
+function showOverview(){
+  destroyMaps();
+  $("#report").style.display = "none";
+  $("#overview").style.display = "block";
+  state.current = -1;
+  if (location.hash) history.replaceState(null, "", location.pathname + location.search);
+  renderOverview();
+  window.scrollTo({ top: 0 });
+}
+async function showFlight(idx){
+  if (idx < 0 || idx >= state.flights.length) return;
+  const fl = state.flights[idx];
+  if (!fl.parsed){
+    try {
+      const text = await api(`/api/flights/${encodeURIComponent(fl.id)}/raw`);
+      fl.parsed = parseG3X(text);
+    } catch(e){ toast("Flug konnte nicht geladen werden", e.message, "err", 8000); return; }
+  }
+  destroyMaps();
+  $("#overview").style.display = "none";
+  $("#report").style.display = "block";
+  state.current = idx;
+  history.replaceState(null, "", "#f=" + encodeURIComponent(fl.id));
+  renderDetail(fl);
+  window.scrollTo({ top: 0 });
+}
+$("#backBtn").addEventListener("click", showOverview);
+$("#prevBtn").addEventListener("click", () => showFlight(state.current - 1));
+$("#nextBtn").addEventListener("click", () => showFlight(state.current + 1));
+$("#flightSel").addEventListener("change", e => showFlight(+e.target.value));
+$("#fullBtn").addEventListener("click", () => {
+  state.fullLog = !state.fullLog;
+  if (state.current >= 0){ destroyMaps(); renderDetail(state.flights[state.current]); }
+});
+$("#rescanBtn").addEventListener("click", async () => {
+  const btn = $("#rescanBtn"), t = btn.textContent;
+  btn.disabled = true; btn.textContent = "🔄 Wird eingelesen …";
+  try {
+    const res = await api("/api/rescan", { method:"POST" });
+    const c = res.counts || { new:0, dup:0, error:0 };
+    await refresh();
+    reportScan(c, "Eingangsordner eingelesen");
+  } catch(err){ toast("Scan fehlgeschlagen", err.message, "err", 8000); }
+  finally { btn.disabled = false; btn.textContent = t; }
+});
+
+/* ---------- Übersicht ---------- */
+function filteredFlights(){
+  const f = state.filter;
+  return state.flights.map((fl, idx) => ({ fl, idx })).filter(({ fl }) => {
+    const s = fl.summary;
+    if (f.type !== "all" && flType(fl) !== f.type) return false;
+    if (f.month !== "all" && !s.date.startsWith(f.month)) return false;
+    if (f.warnOnly && !s.nCrit && !s.nWarn) return false;
+    return true;
+  });
+}
+
+function renderOverview(){
+  destroyMaps();
+  const fls = state.flights;
+  const S = fls.map(f => f.summary);
+  const total = (k) => S.reduce((s,x) => s + (x[k] || 0), 0);
+  const chron = [...S].sort((a,b) => a.startTs - b.startTs);
+  $("#meta").textContent = fls.length
+    ? `${S.length} Logs · ${fmtDateDE(chron[0].date)} bis ${fmtDateDE(chron[chron.length-1].date)}`
+    : "";
+
+  // Kacheln (immer über alle Logs)
+  const nBy = t => fls.filter(fl => flType(fl) === t).length;
+  const tiles = [
+    ["Logs gesamt", `${S.length} <span style="font-size:12px;color:var(--muted)">✈️ ${nBy("flight")} · 🔧 ${nBy("ground")} · 🔌 ${nBy("panel")}</span>`],
+    ["Motorlaufzeit", fmtDur(total("runSecs"))],
+    ["Strecke gesamt", fmtDist(total("dist"))],
+    ["Überschreitungen", S.reduce((s,x) => s + x.nCrit, 0) + " rot / " + S.reduce((s,x) => s + x.nWarn, 0) + " gelb"],
+    ["Höchste Öltemp.", fmtNum(Math.max(...S.map(x => x.maxOilT ?? -999)), 1) + " °C"],
+    ["Höchste Drehzahl", fmtNum(Math.max(...S.map(x => x.maxRpm ?? 0)), 0) + " rpm"],
+    ["Größte Höhe", fmtNum(Math.max(...S.map(x => x.maxAlt ?? 0)), 0) + " ft"],
+  ];
+  $("#ovTiles").innerHTML = tiles.map(([n,v]) =>
+    `<div class="tile"><div class="name">${n}</div><div class="val" style="font-size:18px">${v}</div></div>`).join("");
+
+  // Filterleiste
+  const f = state.filter;
+  const chipDefs = [["all","Alle"],["flight","✈️ Flüge"],["ground","🔧 Standläufe"],["panel","🔌 Nur Avionik"]];
+  $("#typeChips").innerHTML = chipDefs.map(([t,lbl]) => {
+    const n = t === "all" ? S.length : nBy(t);
+    return `<span class="chip ${f.type === t ? "active" : ""}" data-t="${t}">${lbl} (${n})</span>`;
+  }).join("");
+  document.querySelectorAll("#typeChips .chip").forEach(ch =>
+    ch.addEventListener("click", () => { f.type = ch.dataset.t; state.shown = 300; renderOverview(); }));
+
+  const months = [...new Set(S.map(x => x.date.slice(0,7)))].sort().reverse();
+  $("#monthSel").innerHTML = `<option value="all">Alle Monate</option>` +
+    months.map(m => `<option value="${m}" ${f.month === m ? "selected" : ""}>${m.slice(5,7)}.${m.slice(0,4)}</option>`).join("");
+  $("#monthSel").onchange = e => { f.month = e.target.value; state.shown = 300; renderOverview(); };
+  const wo = $("#warnOnly");
+  wo.checked = f.warnOnly;
+  wo.onchange = () => { f.warnOnly = wo.checked; state.shown = 300; renderOverview(); };
+  const sb = $("#sortBtn");
+  sb.textContent = state.sortAsc ? "↑ Älteste zuerst" : "↓ Neueste zuerst";
+  sb.onclick = () => { state.sortAsc = !state.sortAsc; sortFlights(); renderOverview(); };
+
+  // Zeitleiste (gefiltert, seitenweise)
+  const list = filteredFlights();
+  const ul = $("#flightList"); ul.innerHTML = "";
+  $("#flCount").textContent = list.length === fls.length
+    ? `${fls.length} Logs` : `${list.length} von ${fls.length} Logs`;
+  const frag = document.createDocumentFragment();
+  list.slice(0, state.shown).forEach(({ fl, idx }, li_i) => {
+    const s = fl.summary;
+    const tm = flTM(fl);
+    const flightish = flType(fl) === "flight";
+    const li = document.createElement("li");
+    const badges = [];
+    if (s.nCrit) badges.push(`<span class="badge" title="rote Phasen"><span class="dot" style="background:var(--crit)"></span>${s.nCrit}</span>`);
+    if (s.nWarn) badges.push(`<span class="badge" title="gelbe Phasen"><span class="dot" style="background:var(--warn)"></span>${s.nWarn}</span>`);
+    if (!s.nCrit && !s.nWarn) badges.push(`<span class="badge" title="alles im grünen Bereich"><span class="dot" style="background:var(--good)"></span>OK</span>`);
+    const facts = flType(fl) === "panel"
+      ? `<span>nur Avionik, Motor lief nicht</span>`
+      : `<span><b>${fmtDur(s.runSecs)}</b> Motor</span>` +
+        (flightish ? `<span><b>${fmtDist(s.dist)}</b></span><span>max <b>${fmtNum(s.maxAlt,0)} ft</b></span>` : "") +
+        `<span>max <b>${fmtNum(s.maxRpm,0)} rpm</b></span><span>Öl <b>${fmtNum(s.maxOilT,1)} °C</b></span>`;
+    li.innerHTML = `
+      <span class="fl-type" title="${tm.label}">${tm.icon}</span>
+      <span class="fl-when"><span class="d">${esc(fmtDateDE(s.date))}</span> <span class="t">${esc(s.start.slice(0,5))}</span></span>
+      <span class="fl-facts">${facts}</span>
+      <span class="fl-badges">${badges.join("")}</span>
+      <button class="fl-x" title="Diesen Log entfernen">✕</button>`;
+    li.addEventListener("click", () => showFlight(idx));
+    li.querySelector(".fl-x").addEventListener("click", async e => {
+      e.stopPropagation();
+      if (!confirm(`${tm.label} vom ${fmtDateDE(s.date)} ${s.start.slice(0,5)} entfernen?\n\nDie archivierte CSV wird dabei gelöscht.`)) return;
+      try { await api(`/api/flights/${encodeURIComponent(fl.id)}`, { method:"DELETE" }); }
+      catch(err){ toast("Löschen fehlgeschlagen", err.message, "err", 8000); return; }
+      state.flights.splice(idx, 1);
+      if (state.flights.length) renderOverview();
+      else { $("#overview").style.display = "none"; $("#meta").textContent = ""; destroyMaps(); }
+    });
+    frag.appendChild(li);
+  });
+  ul.appendChild(frag);
+  const mb = $("#moreBtn");
+  if (list.length > state.shown){
+    mb.style.display = "";
+    mb.textContent = `Weitere anzeigen (${list.length - state.shown} verbleibend)`;
+    mb.onclick = () => { state.shown += 500; renderOverview(); };
+  } else mb.style.display = "none";
+
+  // Übersichtskarte: Tracks der aktuellen Auswahl (aus gespeicherten Kurz-Tracks)
+  const MAP_CAP = 100;
+  const mapEl = $("#ovMap");
+  mapEl.innerHTML = "";
+  const withTrack = list.filter(({ fl }) => fl.summary.trackLL && fl.summary.trackLL.length > 1);
+  $("#ovMapCard").style.display = withTrack.length && window.L ? "" : "none";
+  if (withTrack.length && window.L){
+    const drawn = withTrack.slice(0, MAP_CAP);
+    $("#ovMapStats").textContent = drawn.length < withTrack.length
+      ? `${drawn.length} von ${withTrack.length} Tracks (Auswahl weiter einschränken für mehr Detail)`
+      : `${drawn.length} Tracks`;
+    pendingInits.push(() => {
+      const map = L.map(mapEl);
+      activeMaps.push(map);
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+        { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(map);
+      const bounds = [];
+      drawn.forEach(({ fl, idx }, i) => {
+        const s = fl.summary;
+        const pl = L.polyline(s.trackLL, { color: TRACK_COLORS[i % TRACK_COLORS.length], weight: 3, opacity: .8 }).addTo(map);
+        pl.bindTooltip(`${flTM(fl).icon} ${esc(fmtDateDE(s.date))} ${esc(s.start.slice(0,5))} — ${fmtDist(s.dist)}`, { sticky:true });
+        pl.on("click", () => showFlight(idx));
+        bounds.push(...s.trackLL);
+      });
+      if (bounds.length) map.fitBounds(L.latLngBounds(bounds).pad(0.15));
+    });
+  }
+  runPendingInits();
+}
+
+/* Kuratierte Diagramme jenseits des Motors */
+const CURATED = [
+  ["Fluglage & Beschleunigung","Fluglage (Pitch/Roll)","°",1,[["Pitch (deg)","Pitch","var(--s1)"],["Roll (deg)","Roll","var(--s6)"]]],
+  ["Fluglage & Beschleunigung","Steig-/Sinkrate","ft/min",0,[["Vertical Speed (ft/min)","Vertical Speed","var(--s1)"]]],
+  ["Fluglage & Beschleunigung","Beschleunigung","G",2,[["Normal Acceleration (G)","Vertikal (Normal)","var(--s1)"],["Lateral Acceleration (G)","Seitlich (Lateral)","var(--s6)"]]],
+  ["Fluglage & Beschleunigung","Anstellwinkel (AOA)","",2,[["AOA","AOA (normiert)","var(--s1)"],["AOA Cp","AOA Cp","var(--s5)"]]],
+  ["Fluglage & Beschleunigung","AHRS-Vergleich Pitch/Roll","°",1,[["Pitch Delta (deg)","Pitch-Differenz","var(--s1)"],["Roll Delta (deg)","Roll-Differenz","var(--s6)"]]],
+  ["Fluglage & Beschleunigung","AHRS-Abweichung","%",0,[["AHRS 1 Dev (%)","AHRS 1","var(--s1)"],["SFD AHRS Dev (%)","SFD AHRS","var(--s5)"]]],
+  ["Kurs & Wind","Steuerkurs & Track","°",0,[["Magnetic Heading (deg)","Steuerkurs (mag.)","var(--s1)"],["GPS Ground Track (deg)","GPS-Track","var(--s5)"]]],
+  ["Kurs & Wind","Windgeschwindigkeit","kt",0,[["Wind Speed (kt)","Wind","var(--s1)"]]],
+  ["Kurs & Wind","Windrichtung","°",0,[["Wind Direction (deg)","Windrichtung","var(--s1)"]]],
+  ["Kurs & Wind","Missweisung","°",1,[["Magnetic Variation (deg)","Missweisung","var(--s1)"]]],
+  ["Höhe & Atmosphäre","Druck- und Dichtehöhe","ft",0,[["Pressure Altitude (ft)","Druckhöhe","var(--s1)"],["Density Altitude (ft)","Dichtehöhe","var(--s6)"]]],
+  ["Höhe & Atmosphäre","Höhe über Grund","ft",0,[["Height Above Ground (ft)","AGL","var(--s1)"]]],
+  ["Höhe & Atmosphäre","QNH (Baro Setting)","inHg",2,[["Baro Setting (inch Hg)","QNH","var(--s1)"]]],
+  ["GPS-Qualität","Satelliten","",0,[["GPS Sats","Satelliten","var(--s1)"]]],
+  ["GPS-Qualität","Positionsgenauigkeit (HFOM/VFOM)","ft",0,[["GPS HFOM (ft)","horizontal (HFOM)","var(--s1)"],["GPS VFOM (ft)","vertikal (VFOM)","var(--s6)"]]],
+  ["GPS-Qualität","GPS-Geschwindigkeitskomponenten","m/s",2,[["GPS Velocity E (m/sec)","Ost","var(--s1)"],["GPS Velocity N (m/sec)","Nord","var(--s5)"],["GPS Velocity U (m/sec)","vertikal","var(--s6)"]]],
+  ["Navigation & Autopilot","Nav-Entfernung","nm",1,[["Nav Distance (nm)","Entfernung","var(--s1)"]]],
+  ["Navigation & Autopilot","Nav-Peilung & -Kurs","°",0,[["Nav Bearing (deg)","Peilung","var(--s1)"],["Nav Course (deg)","Kurs","var(--s5)"]]],
+  ["Navigation & Autopilot","Querablage (XTK)","nm",3,[["Nav Cross Track Distance (nm)","Querablage","var(--s1)"]]],
+  ["Navigation & Autopilot","CDI-Ablagen","",2,[["Horizontal CDI Deflection","horizontal","var(--s1)"],["Vertical CDI Deflection","vertikal","var(--s6)"],["VNAV CDI Deflection","VNAV","var(--s5)"]]],
+  ["Navigation & Autopilot","Vorwahl Steuerkurs","°",0,[["Selected Heading (deg)","Sel. Heading","var(--s1)"]]],
+  ["Navigation & Autopilot","Vorwahl Höhe","ft",0,[["Selected Altitude (ft)","Sel. Altitude","var(--s1)"],["VNAV Altitude (ft)","VNAV Altitude","var(--s5)"],["FD Altitude (ft)","FD Altitude","var(--s6)"]]],
+  ["Navigation & Autopilot","Vorwahl Steig-/Sinkrate","ft/min",0,[["Selected Vertical Speed (ft/min)","Sel. VS","var(--s1)"],["AP VS Command (ft/min)","AP VS Cmd","var(--s6)"]]],
+  ["Navigation & Autopilot","Vorwahl Geschwindigkeit","kt",0,[["Selected Airspeed (kt)","Sel. IAS","var(--s1)"]]],
+  ["Navigation & Autopilot","Flight-Director-Kommandos","°",1,[["FD Roll Command (deg)","FD Roll","var(--s1)"],["FD Pitch Command (deg)","FD Pitch","var(--s6)"]]],
+  ["Navigation & Autopilot","Autopilot-Kommandos","°",1,[["AP Roll Command (deg)","AP Roll","var(--s1)"],["AP Pitch Command (deg)","AP Pitch","var(--s6)"],["AP Altitude Command (ft)","AP Alt Cmd","var(--s5)"]]],
+  ["Navigation & Autopilot","Autopilot-Servomomente","%",0,[["AP Roll Torque (%)","Roll","var(--s1)"],["AP Pitch Torque (%)","Pitch","var(--s6)"],["AP Roll Trim Torque (%)","Roll-Trim","var(--s5)"],["AP Pitch Trim Torque (%)","Pitch-Trim","var(--s3)"]]],
+  ["Navigation & Autopilot","Höhenrudertrimmung","",2,[["Elevator Trim","Trimmung","var(--s1)"]]],
+];
+
+/* ---------- Detailbericht ---------- */
+function renderDetail(flight){
+  destroyMaps();
+  const { info, catalog, numCols, catCols } = flight.parsed;
+  const fullRows = flight.parsed.rows;
+  const s = flight.summary;
+  const tm = flTM(flight);
+
+  // Klassifizierung manuell übersteuerbar
+  const ts = $("#typeSel");
+  const autoTM = TYPE_META[s.type] || TYPE_META.panel;
+  ts.innerHTML = `<option value="auto">Auto: ${autoTM.icon} ${autoTM.label}</option>` +
+    Object.entries(TYPE_META).map(([k, v]) =>
+      `<option value="${k}">${v.icon} ${v.label} (manuell)</option>`).join("");
+  ts.value = flight.typeOverride || "auto";
+  ts.onchange = async () => {
+    flight.typeOverride = ts.value === "auto" ? null : ts.value;
+    try {
+      await api(`/api/flights/${encodeURIComponent(flight.id)}`, { method:"PATCH",
+        headers:{ "content-type":"application/json" },
+        body: JSON.stringify({ typeOverride: flight.typeOverride }) });
+    } catch(e){ console.warn("Speichern fehlgeschlagen", e); }
+    renderDetail(flight);
+  };
+
+  // Anzeige auf Motorlaufzeit (±1 min) zuschneiden — Daten ohne laufenden
+  // Motor sind fürs Motor-Monitoring uninteressant. Umschaltbar.
+  let rows = fullRows, trimmed = false;
+  if (!state.fullLog && s.engStart != null){
+    const a = s.engStart - 60, b = s.engEnd + 60;
+    const cut = fullRows.filter(r => r.sec >= a && r.sec <= b);
+    if (cut.length > 10 && cut.length < fullRows.length){ rows = cut; trimmed = true; }
+  }
+  const fullBtn = $("#fullBtn");
+  fullBtn.style.display = s.engStart != null ? "" : "none";
+  fullBtn.textContent = state.fullLog ? "✂ Nur Motorlaufzeit" : "◱ Ganzes Log";
+  fullBtn.title = state.fullLog
+    ? "Anzeige auf Motorstart bis Motorstopp (±1 min) begrenzen"
+    : "Auch die Zeit davor/danach anzeigen (nur Avionik)";
+
+  // Umschalter
+  const sel = $("#flightSel");
+  sel.innerHTML = state.flights.map((fl, i) =>
+    `<option value="${i}" ${i === state.current ? "selected" : ""}>${flTM(fl).icon} ${esc(fmtDateDE(fl.summary.date))} · ${esc(fl.summary.start.slice(0,5))} (${fmtDur(fl.summary.dur)})</option>`).join("");
+  $("#prevBtn").disabled = state.current <= 0;
+  $("#nextBtn").disabled = state.current >= state.flights.length - 1;
+
+  const t0 = rows[0], t1 = rows[rows.length-1];
+  $("#meta").textContent =
+    `${info.aircraft_ident || "?"} · ${tm.icon} ${tm.label} · ${fmtDateDE(t0.date)} · ${t0.timeStr}–${t1.timeStr} Lokalzeit` +
+    (trimmed ? ` (auf Motorlaufzeit ±1 min zugeschnitten, Log gesamt ${fmtDur(s.dur)})` : ` (${fmtDur(t1.sec - t0.sec)})`) +
+    ` · Motorlaufzeit ca. ${fmtDur(s.runSecs)} · Strecke ${fmtDist(s.dist)}` +
+    (info.engine_hours ? ` · Motorstunden lt. G3X: ${info.engine_hours} h` : "");
+
+  const allEps = allEpisodes(rows);
+  const epWorst = {};
+  for (const ep of allEps)
+    epWorst[ep.key] = Math.max(epWorst[ep.key] || 0, ep.sev === "crit" ? 2 : 1);
+
+  // Kacheln
+  const tileKeys = ["rpm","map","oilT","coolT","manT","oilP","fuelP","egtSplit","ff","amps","volts","oat"];
+  const tiles = $("#tiles"); tiles.innerHTML = "";
+  for (const k of tileKeys){
+    const st = stats(rows, k);
+    if (!st) continue;
+    const L = LIMITS[k];
+    const w = epWorst[k] || 0;
+    const col = w === 2 ? "var(--crit)" : w === 1 ? "var(--warn)" : "var(--good)";
+    const d = document.createElement("div");
+    d.className = "tile";
+    d.innerHTML = `<div class="name"><span class="dot" style="background:${L.zones?col:"var(--axis)"}"></span>${L.label}</div>
+      <div class="val">${fmtNum(st.max, L.dec)}<span class="unit"> ${L.unit} max</span></div>
+      <div class="mm">Ø ${fmtNum(st.avg, L.dec)} · min ${fmtNum(st.min, L.dec)}</div>`;
+    tiles.appendChild(d);
+  }
+  const egtMax = Math.max(...["egt1","egt2","egt3","egt4"].map(k => stats(rows,k)?.max ?? -1));
+  if (egtMax > 0){
+    const w = Math.max(...["egt1","egt2","egt3","egt4"].map(k => epWorst[k] || 0));
+    const col = w === 2 ? "var(--crit)" : w === 1 ? "var(--warn)" : "var(--good)";
+    const d = document.createElement("div");
+    d.className = "tile";
+    d.innerHTML = `<div class="name"><span class="dot" style="background:${col}"></span>EGT (heißester Zyl.)</div>
+      <div class="val">${fmtNum(egtMax,0)}<span class="unit"> °C max</span></div>
+      <div class="mm">Limit 950 °C</div>`;
+    tiles.appendChild(d);
+  }
+
+  // Warnliste
+  const wl = $("#warnings");
+  if (!allEps.length){
+    wl.innerHTML = `<div class="allok"><span class="badge"><span class="dot" style="background:var(--good)"></span>Alle Werte im grünen Bereich</span> — keine Phase ≥ 3 s außerhalb der Normalbereiche (bei laufendem Motor).</div>`;
+  } else {
+    const ul = document.createElement("ul"); ul.className = "warnlist";
+    for (const ep of allEps){
+      const L = LIMITS[ep.key] || LIMITS.egt;
+      const li = document.createElement("li");
+      li.innerHTML = `<span class="t">${ep.startStr}–${ep.endStr.slice(0,8)}</span>
+        <span class="ic">${STATUS_ICON[ep.sev]}</span>
+        <span><b>${L.label}</b> ${ep.sev === "crit" ? "über Limit" : "im Vorwarnbereich"} für ${fmtDur(ep.end-ep.start+1)} — Spitze ${fmtNum(ep.peak, L.dec)} ${L.unit}</span>`;
+      ul.appendChild(li);
+    }
+    wl.innerHTML = ""; wl.appendChild(ul);
+    const over5 = allEps.filter(e => e.key === "rpm" && e.end - e.start + 1 > 300);
+    if (over5.length){
+      const div = document.createElement("div");
+      div.innerHTML = `<span class="badge" style="margin-top:10px"><span class="dot" style="background:var(--crit)"></span>Achtung: Drehzahl über 5500 rpm länger als 5 Minuten — laut OM nur max. 5 min zulässig.</span>`;
+      wl.appendChild(div);
+    }
+  }
+
+  // CAS
+  const casDiv = $("#cas");
+  const casMap = new Map();
+  for (const r of rows){
+    if (!r.cas) continue;
+    for (const msg of r.cas.split("/").map(x => x.trim()).filter(Boolean)){
+      if (!casMap.has(msg)) casMap.set(msg, { first:r.timeStr, last:r.timeStr, n:0 });
+      const m = casMap.get(msg); m.last = r.timeStr; m.n++;
+    }
+  }
+  if (!casMap.size) casDiv.innerHTML = `<div class="allok">Keine CAS-Meldungen im Log.</div>`;
+  else {
+    const ul = document.createElement("ul"); ul.className = "warnlist";
+    for (const [msg,m] of casMap){
+      const li = document.createElement("li");
+      li.innerHTML = `<span class="t">${m.first}–${m.last}</span><span class="ic">ℹ️</span><span><b>${esc(msg)}</b> (${fmtDur(m.n)} aktiv)</span>`;
+      ul.appendChild(li);
+    }
+    casDiv.innerHTML = ""; casDiv.appendChild(ul);
+  }
+
+  /* Abschnitte */
+  const sections = $("#sections"); sections.innerHTML = "";
+  const secEls = new Map();
+  const section = (name, open) => {
+    if (secEls.has(name)) return secEls.get(name).content;
+    const det = document.createElement("details");
+    det.className = "section"; det.open = open !== false;
+    const sum = document.createElement("summary");
+    sum.innerHTML = name + ' <span class="count"></span>';
+    det.appendChild(sum);
+    const content = document.createElement("div");
+    det.appendChild(content);
+    sections.appendChild(det);
+    secEls.set(name, { det, sum, content, n:0 });
+    return content;
+  };
+  const bump = name => { const x = secEls.get(name); x.n++; x.sum.querySelector(".count").textContent = `(${x.n})`; };
+  const addChart = (secName, card) => { section(secName).appendChild(card); bump(secName); };
+
+  const mkEng = (title, series, key, opts) =>
+    addChart("Motor", chartCard(rows, title, series, LIMITS[key], opts || {}));
+  section("Motor", true);
+  mkEng("Drehzahl", [{key:"rpm", label:"RPM", color:"var(--s1)"}], "rpm");
+  mkEng("Ladedruck (MAP)", [{key:"map", label:"MAP", color:"var(--s1)"}], "map");
+  mkEng("Öl- und Kühlmitteltemperatur", [
+      {key:"oilT", label:"Öltemperatur", color:"var(--s1)"},
+      {key:"coolT", label:"Kühlmittel", color:"var(--s6)"},
+    ], "oilT", { zoneNote:"Farbzonen: Öltemperatur (blau = unter 50 °C, Start/Warmlauf)" });
+  mkEng("Ansaugluft- und Außentemperatur", [
+      {key:"manT", label:"Ansaugluft", color:"var(--s1)"},
+      {key:"oat", label:"Außentemperatur", color:"var(--s5)"},
+    ], "manT", { zoneNote:"Farbzonen: Ansauglufttemperatur" });
+  mkEng("Öldruck", [{key:"oilP", label:"Öldruck", color:"var(--s1)"}], "oilP");
+  mkEng("Kraftstoffdruck", [{key:"fuelP", label:"Kraftstoffdruck", color:"var(--s1)"}], "fuelP");
+  mkEng("Abgastemperaturen (EGT)", [
+      {key:"egt1", label:"EGT 1", color:"var(--s1)"},
+      {key:"egt2", label:"EGT 2", color:"var(--s2)"},
+      {key:"egt3", label:"EGT 3", color:"var(--s3)"},
+      {key:"egt4", label:"EGT 4", color:"var(--s4)"},
+    ], "egt");
+  mkEng("EGT-Split (max − min)", [{key:"egtSplit", label:"EGT-Split", color:"var(--s1)"}], "egtSplit");
+  mkEng("Verbrauch", [{key:"ff", label:"Fuel Flow", color:"var(--s1)"}], "ff");
+  if (stats(rows,"volts")) mkEng("Bordspannung", [{key:"volts", label:"Spannung", color:"var(--s1)"}], "volts");
+  mkEng("Batteriestrom", [{key:"amps", label:"Strom", color:"var(--s1)"}], "amps");
+
+  // Flugweg & GPS
+  section("Flugweg & GPS", true);
+  const trk = trackCard(rows);
+  if (trk) addChart("Flugweg & GPS", trk);
+  if (stats(rows, "alt") || stats(rows, "gpsAlt"))
+    addChart("Flugweg & GPS", chartCard(rows, "Höhe", [
+      {key:"alt", label:"Baro-Höhe", color:"var(--s1)"},
+      {key:"gpsAlt", label:"GPS-Höhe", color:"var(--s5)"},
+    ], LIMITS.alt, {}));
+  if (stats(rows, "gndSpd") || stats(rows, "ias"))
+    addChart("Flugweg & GPS", chartCard(rows, "Geschwindigkeit", [
+      {key:"gndSpd", label:"Groundspeed (GPS)", color:"var(--s1)"},
+      {key:"ias", label:"IAS", color:"var(--s6)"},
+    ], LIMITS.gndSpd, {}));
+
+  // Kuratierte Gruppen
+  const colByName = {};
+  for (const c of catalog) colByName[c.name] = c;
+  const used = new Set();
+  for (const [grp, title, unit, dec, defs] of CURATED){
+    const series = [];
+    for (const [hname, label, color] of defs){
+      const col = colByName[hname];
+      if (!col) continue;
+      used.add(hname);
+      if (col.kind === "num" && !col.hasData) continue;
+      series.push({ key: col.key, label, color });
+    }
+    if (!series.length) continue;
+    const L = { label:title, unit, dec, zones:null, note:"" };
+    if (!series.some(x => stats(rows, x.key, L))) continue;
+    addChart(grp, chartCard(rows, title, series, L, {}));
+  }
+
+  // Übrige numerische Spalten automatisch
+  for (const col of numCols){
+    if (used.has(col.name) || !col.hasData) continue;
+    const span = Math.abs(col.max - col.min);
+    const dec = span >= 100 ? 0 : span >= 3 ? 1 : 2;
+    const unitM = col.name.match(/\(([^)]+)\)\s*$/);
+    const L = { label: col.name, unit: unitM ? unitM[1] : "", dec, zones:null, note:"CSV-Spalte: " + col.name };
+    addChart("Weitere Messwerte", chartCard(rows, col.name.replace(/\s*\([^)]*\)\s*$/, ""), [
+      { key: col.key, label: col.name, color:"var(--s1)" }], L, {}));
+  }
+
+  // Status & Ereignisse
+  const catsWithData = catCols.filter(c => c.n > 0);
+  if (catsWithData.length){
+    const cont = section("Status & Ereignisse", false);
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `<h2>Zustandsänderungen</h2>
+      <div class="zonenote" style="margin:0 0 10px">Für Textspalten (Modi, Statuswerte) wird jede Änderung mit Uhrzeit gelistet — ein Liniendiagramm ergibt hier keinen Sinn.</div>`;
+    const grid = document.createElement("div"); grid.className = "statgrid";
+    for (const c of catsWithData){
+      const box = document.createElement("div"); box.className = "statcol";
+      const evs = c.events.filter(e => e.val !== "" || c.events.indexOf(e) > 0);
+      let html = `<h3>${esc(c.label)} <span style="color:var(--muted);font-weight:400">(${evs.length} Änderungen)</span></h3><ul>`;
+      const MAXE = 30;
+      for (const e of evs.slice(0, MAXE))
+        html += `<li><span class="t">${e.timeStr}</span><span>${e.val === "" ? "<i>leer</i>" : esc(e.val)}</span></li>`;
+      if (evs.length > MAXE) html += `<li class="more">… ${evs.length - MAXE} weitere Änderungen</li>`;
+      html += "</ul>";
+      box.innerHTML = html;
+      grid.appendChild(box);
+    }
+    card.appendChild(grid);
+    cont.appendChild(card); bump("Status & Ereignisse");
+  }
+
+  // Referenztabelle
+  const tb = $("#limitsTable");
+  tb.innerHTML = `<thead><tr><th>Parameter</th><th>Grün (normal)</th><th>Gelb (Vorsicht)</th><th>Rot (Limit)</th><th>Anmerkung</th></tr></thead>`;
+  const body = document.createElement("tbody");
+  for (const k of ["rpm","map","oilT","coolT","manT","oilP","fuelP","egt","egtSplit","volts","oat"]){
+    const L = LIMITS[k];
+    if (!L.zones) continue;
+    const f = v => Math.abs(v) >= 1e8 ? "" : fmtNum(v, L.dec);
+    const seg = z2 => L.zones.filter(z => z[2] === z2).map(z =>
+        (z[0] <= -999 ? "≤ " + f(z[1]) : Math.abs(z[1]) >= 1e8 ? "≥ " + f(z[0]) : f(z[0]) + " – " + f(z[1]))).join(" und ");
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td><b>${L.label}</b> <span style="color:var(--muted)">(${L.unit})</span></td>
+      <td class="c">${seg("good") || "–"}</td><td class="c">${[seg("cold"),seg("warn")].filter(Boolean).join(" / ") || "–"}</td>
+      <td class="c">${seg("crit") || "–"}</td><td>${L.note}</td>`;
+    body.appendChild(tr);
+  }
+  tb.appendChild(body);
+
+  // Nicht dargestellte Spalten
+  const emptyNum = numCols.filter(c => !c.hasData).map(c => c.name);
+  const emptyCat = catCols.filter(c => c.n === 0).map(c => CAT_COLS[c.name] || c.name);
+  let eh = "";
+  if (emptyNum.length || emptyCat.length)
+    eh += `<div><b>Im Log leer</b> (Sensor nicht verbaut oder Funktion nicht aktiv): ${[...emptyNum, ...emptyCat].map(n => `<code>${esc(n)}</code>`).join(" ")}</div>`;
+  eh += `<div style="margin-top:6px"><b>Bewusst ausgelassen:</b> <code>UTC Time</code> <code>UTC Offset</code> (redundant zur Lokalzeit), <code>GPS Time of Week</code> (interner Zähler), <code>Latitude</code>/<code>Longitude</code> (in der Flugweg-Karte enthalten), <code>Date</code>/<code>Time</code> (Zeitachse aller Diagramme).</div>`;
+  $("#emptyCols").innerHTML = eh;
+
+  runPendingInits();
+}
+
+// Beim Drucken alle Abschnitte aufklappen
+let wasClosed = [];
+window.addEventListener("beforeprint", () => {
+  wasClosed = [...document.querySelectorAll("details.section:not([open])")];
+  wasClosed.forEach(d => d.open = true);
+});
+window.addEventListener("afterprint", () => { wasClosed.forEach(d => d.open = false); wasClosed = []; });
+
+/* ---- Diagramm: SVG-Liniendiagramm mit Statuszonen + Crosshair-Tooltip ---- */
+function chartCard(rows, title, series, L, opts){
+  const card = document.createElement("div");
+  card.className = "card";
+
+  const st0 = stats(rows, series[0].key, L) || stats(rows, (series[1]||{}).key, L);
+  const head = document.createElement("div");
+  head.className = "chart-head";
+  head.innerHTML = `<h2>${esc(title)}</h2>` + (st0 ?
+    `<span class="stats">max ${fmtNum(st0.max,L.dec)} · Ø ${fmtNum(st0.avg,L.dec)} · min ${fmtNum(st0.min,L.dec)} ${esc(L.unit)}</span>` : "");
+  card.appendChild(head);
+
+  const W = 1100, H = 260, padL = 52, padR = 14, padT = 10, padB = 26;
+  const t0 = rows[0].sec, t1 = rows[rows.length-1].sec;
+  const X = sx => padL + (sx - t0) / Math.max(1, t1 - t0) * (W - padL - padR);
+
+  let lo = Infinity, hi = -Infinity;
+  for (const sr of series) for (const r of rows){
+    const v = r[sr.key]; if (v == null) continue;
+    if (v < lo) lo = v; if (v > hi) hi = v;
+  }
+  if (!isFinite(lo)){ card.appendChild(Object.assign(document.createElement("div"),{className:"allok",textContent:"Keine Daten in diesem Log."})); return card; }
+  if (L.zones) for (const [a,b] of L.zones){
+    if (a > -1e8 && a < hi + (hi-lo) * .6 && a > lo - (hi-lo)*.6) { lo = Math.min(lo,a); hi = Math.max(hi,a); }
+  }
+  const span = Math.max(hi - lo, L.dec ? 1 : 10);
+  lo -= span * .06; hi += span * .10;
+
+  const Y = v => padT + (hi - v) / (hi - lo) * (H - padT - padB);
+  const svg = document.createElementNS(svgNS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+
+  if (L.zones) for (const [a,b,z] of L.zones){
+    const ya = Y(Math.max(lo, a)), yb = Y(Math.min(hi, b));
+    if (ya - yb > 0.5 && Math.max(lo,a) < hi && Math.min(hi,b) > lo){
+      const rc = document.createElementNS(svgNS,"rect");
+      rc.setAttribute("x",padL); rc.setAttribute("y",yb);
+      rc.setAttribute("width",W-padL-padR); rc.setAttribute("height",ya-yb);
+      rc.setAttribute("fill",WASH[z]); svg.appendChild(rc);
+    }
+  }
+  for (const tv of niceTicks(lo, hi, 5)){
+    const y = Y(tv);
+    const ln = document.createElementNS(svgNS,"line");
+    ln.setAttribute("x1",padL); ln.setAttribute("x2",W-padR); ln.setAttribute("y1",y); ln.setAttribute("y2",y);
+    ln.setAttribute("stroke","var(--grid)"); ln.setAttribute("stroke-width","1"); svg.appendChild(ln);
+    const tx = document.createElementNS(svgNS,"text");
+    tx.setAttribute("x",padL-8); tx.setAttribute("y",y+4); tx.setAttribute("text-anchor","end");
+    tx.setAttribute("font-size","11"); tx.setAttribute("fill","var(--muted)");
+    tx.textContent = fmtNum(tv, tv % 1 ? L.dec : 0); svg.appendChild(tx);
+  }
+  const xTickEvery = niceTimeStep(t1 - t0);
+  for (let sx = Math.ceil(t0/xTickEvery)*xTickEvery; sx <= t1; sx += xTickEvery){
+    const tx = document.createElementNS(svgNS,"text");
+    tx.setAttribute("x",X(sx)); tx.setAttribute("y",H-8); tx.setAttribute("text-anchor","middle");
+    tx.setAttribute("font-size","11"); tx.setAttribute("fill","var(--muted)");
+    const ss = sx % 86400;
+    tx.textContent = String(Math.floor(ss/3600)).padStart(2,"0") + ":" + String(Math.floor(ss%3600/60)).padStart(2,"0");
+    svg.appendChild(tx);
+  }
+  const base = document.createElementNS(svgNS,"line");
+  base.setAttribute("x1",padL); base.setAttribute("x2",W-padR);
+  base.setAttribute("y1",H-padB); base.setAttribute("y2",H-padB);
+  base.setAttribute("stroke","var(--axis)"); svg.appendChild(base);
+
+  for (const sr of series){
+    const path = document.createElementNS(svgNS,"path");
+    let d = "", pen = false;
+    const bucketW = (t1 - t0) / (W - padL - padR);
+    let bStart = t0, bMin = null, bMax = null, bFirst = null, bLast = null;
+    const emit = () => {
+      if (bFirst == null){ pen = false; return; }
+      const x = X(bStart + bucketW/2);
+      const pv = bMin === bMax ? [bFirst] : [bFirst, bMin, bMax, bLast];
+      for (const v of pv){
+        d += (pen ? "L" : "M") + x.toFixed(1) + " " + Y(v).toFixed(1);
+        pen = true;
+      }
+    };
+    for (const r of rows){
+      if (r.sec >= bStart + bucketW){
+        emit();
+        bStart += bucketW * Math.max(1, Math.floor((r.sec - bStart)/bucketW));
+        bMin = bMax = bFirst = bLast = null;
+      }
+      const v = r[sr.key];
+      if (v == null){ if (bFirst != null){ emit(); bMin=bMax=bFirst=bLast=null; } pen = false; continue; }
+      if (bFirst == null) bFirst = v;
+      bLast = v;
+      bMin = bMin == null ? v : Math.min(bMin, v);
+      bMax = bMax == null ? v : Math.max(bMax, v);
+    }
+    emit();
+    path.setAttribute("d", d);
+    path.setAttribute("fill","none");
+    path.setAttribute("stroke", sr.color);
+    path.setAttribute("stroke-width","1.8");
+    path.setAttribute("stroke-linejoin","round");
+    svg.appendChild(path);
+  }
+
+  const cross = document.createElementNS(svgNS,"line");
+  cross.setAttribute("y1",padT); cross.setAttribute("y2",H-padB);
+  cross.setAttribute("stroke","var(--axis)"); cross.setAttribute("stroke-dasharray","3 3");
+  cross.style.display = "none"; svg.appendChild(cross);
+
+  const box = document.createElement("div");
+  box.className = "chartbox";
+  box.appendChild(svg);
+  const tip = document.createElement("div");
+  tip.className = "tip"; box.appendChild(tip);
+  card.appendChild(box);
+
+  svg.addEventListener("pointermove", ev => {
+    const pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
+    const p = pt.matrixTransform(svg.getScreenCTM().inverse());
+    if (p.x < padL || p.x > W - padR){ tip.style.display="none"; cross.style.display="none"; return; }
+    const sec = t0 + (p.x - padL) / (W - padL - padR) * (t1 - t0);
+    let a = 0, b = rows.length - 1;
+    while (b - a > 1){ const m = (a+b) >> 1; (rows[m].sec < sec) ? a = m : b = m; }
+    const r = (sec - rows[a].sec < rows[b].sec - sec) ? rows[a] : rows[b];
+    cross.setAttribute("x1", X(r.sec)); cross.setAttribute("x2", X(r.sec));
+    cross.style.display = "";
+    let html = `<div class="tt">${r.timeStr}</div>`;
+    for (const sr of series){
+      const v = r[sr.key];
+      html += `<div class="row"><span><i style="background:${sr.color}"></i>${esc(sr.label)}</span><b>${fmtNum(v, L.dec)} ${esc(L.unit)}</b></div>`;
+    }
+    tip.innerHTML = html;
+    tip.style.display = "block";
+    const bb = box.getBoundingClientRect();
+    const px = (X(r.sec) / W) * bb.width;
+    tip.style.left = Math.min(px + 14, bb.width - tip.offsetWidth - 4) + "px";
+    tip.style.top = "10px";
+  });
+  svg.addEventListener("pointerleave", () => { tip.style.display="none"; cross.style.display="none"; });
+
+  if (series.length > 1){
+    const lg = document.createElement("div");
+    lg.className = "legend";
+    lg.innerHTML = series.map(sr => `<span><i style="background:${sr.color}"></i>${esc(sr.label)}</span>`).join("");
+    card.appendChild(lg);
+  }
+  if (opts.zoneNote || L.note){
+    const note = document.createElement("div");
+    note.className = "zonenote";
+    note.textContent = (opts.zoneNote ? opts.zoneNote + " — " : "") + (L.note || "");
+    card.appendChild(note);
+  }
+  return card;
+}
+
+/* ---- Flugweg: OpenStreetMap (Leaflet), Fallback SVG. Hover = Werte dieser Sekunde ---- */
+const TIPROWS = [
+  ["gpsAlt","GPS-Höhe","ft",0], ["alt","Baro-Höhe","ft",0],
+  ["gndSpd","Groundspeed","kt",0], ["ias","IAS","kt",0],
+  ["rpm","Drehzahl","rpm",0], ["ff","Verbrauch","l/h",1],
+  ["oilT","Öltemp.","°C",1], ["coolT","Kühlmittel","°C",1],
+];
+function tipHtml(r){
+  let html = `<div class="tt">${r.timeStr}</div>`;
+  for (const [k, lbl, unit, dec] of TIPROWS){
+    if (r[k] == null) continue;
+    html += `<div class="row"><span>${lbl}</span><b>${fmtNum(r[k], dec)} ${unit}</b></div>`;
+  }
+  return html;
+}
+
+function trackCard(rows){
+  const track = computeTrack(rows);
+  if (!track) return null;
+  if (window.L) return leafletTrackCard(track);
+  return svgTrackCard(track);
+}
+
+function leafletTrackCard(track){
+  const { pts, dist } = track;
+  const card = document.createElement("div");
+  card.className = "card"; card.id = "track";
+  card.innerHTML = `<div class="chart-head"><h2>Flugweg (GPS)</h2>
+    <span class="stats">Strecke ${fmtDist(dist)}${dist < 1852 ? " (Rollen/Stand)" : ""} · ${pts.length.toLocaleString("de-AT")} GPS-Punkte · Maus über den Weg = Werte in dieser Sekunde</span></div>`;
+  const mapEl = document.createElement("div");
+  mapEl.className = "mapbox";
+  card.appendChild(mapEl);
+  const note = document.createElement("div");
+  note.className = "zonenote";
+  note.textContent = "Kartendaten © OpenStreetMap-Mitwirkende (Kacheln werden aus dem Internet geladen).";
+  card.appendChild(note);
+
+  const tip = document.createElement("div");
+  tip.className = "tip";
+  mapEl.appendChild(tip);
+
+  pendingInits.push(() => {
+    const map = L.map(mapEl);
+    activeMaps.push(map);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+      { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(map);
+
+    const step = Math.max(1, Math.floor(pts.length / 2000));
+    const idxs = [];
+    for (let i = 0; i < pts.length; i += step) idxs.push(i);
+    if (idxs[idxs.length-1] !== pts.length-1) idxs.push(pts.length-1);
+    const ll = idxs.map(i => [pts[i].lat, pts[i].lon]);
+
+    L.polyline(ll, { color:"#2a78d6", weight: 3.5, opacity: .9 }).addTo(map);
+    L.circleMarker(ll[0], { radius:7, color:"#fff", weight:2, fillColor:"#0ca30c", fillOpacity:1 })
+      .addTo(map).bindTooltip("Start " + pts[0].timeStr);
+    L.circleMarker(ll[ll.length-1], { radius:7, color:"#fff", weight:2, fillColor:"#d03b3b", fillOpacity:1 })
+      .addTo(map).bindTooltip("Ende " + pts[pts.length-1].timeStr);
+    map.fitBounds(L.latLngBounds(ll).pad(0.12));
+
+    const hov = L.circleMarker(ll[0], { radius:7.5, color:"#fff", weight:2, fillColor:"#eb6834", fillOpacity:1, opacity:0, interactive:false });
+    hov.addTo(map); hov.setStyle({ opacity:0, fillOpacity:0 });
+
+    // Containerkoordinaten cachen, nach Zoom/Pan neu berechnen
+    let cpts = null;
+    const recompute = () => { cpts = idxs.map(i => map.latLngToContainerPoint([pts[i].lat, pts[i].lon])); };
+    map.on("zoomend moveend viewreset resize", recompute);
+    recompute();
+
+    map.on("mousemove", e => {
+      if (!cpts) recompute();
+      const { x, y } = e.containerPoint;
+      let best = -1, bd = Infinity;
+      for (let j = 0; j < cpts.length; j++){
+        const dx = cpts[j].x - x, dy = cpts[j].y - y;
+        const dd = dx*dx + dy*dy;
+        if (dd < bd){ bd = dd; best = j; }
+      }
+      if (best < 0 || bd > 70*70){
+        hov.setStyle({ opacity:0, fillOpacity:0 }); tip.style.display = "none"; return;
+      }
+      const r = pts[idxs[best]];
+      hov.setLatLng([r.lat, r.lon]);
+      hov.setStyle({ opacity:1, fillOpacity:1 });
+      tip.innerHTML = tipHtml(r);
+      tip.style.display = "block";
+      const px = cpts[best].x, py = cpts[best].y;
+      const bw = mapEl.clientWidth, bh = mapEl.clientHeight;
+      tip.style.left = Math.min(Math.max(4, px + 16), bw - tip.offsetWidth - 4) + "px";
+      tip.style.top = Math.max(4, Math.min(py - 10, bh - tip.offsetHeight - 4)) + "px";
+    });
+    map.on("mouseout", () => { hov.setStyle({ opacity:0, fillOpacity:0 }); tip.style.display = "none"; });
+  });
+  return card;
+}
+
+/* Fallback ohne Internet/Leaflet: Track als Umriss */
+function svgTrackCard(track){
+  const { pts, dist } = track;
+  const rad = d => d * Math.PI / 180;
+  const midLat = pts.reduce((s,p) => s + p.lat, 0) / pts.length;
+  const mPerDegLat = 111320, mPerDegLon = 111320 * Math.cos(rad(midLat));
+  const xs = pts.map(p => p.lon * mPerDegLon), ys = pts.map(p => p.lat * mPerDegLat);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const spanX = Math.max(x1 - x0, 30), spanY = Math.max(y1 - y0, 30);
+  const W = 1100, maxH = 540, pad = 34;
+  const scale = Math.min((W - 2*pad) / spanX, (maxH - 2*pad) / spanY);
+  const H = Math.max(260, Math.round(spanY * scale + 2*pad));
+  const X = x => pad + (x - x0) * scale + (W - 2*pad - spanX*scale) / 2;
+  const Y = y => H - pad - (y - y0) * scale - (H - 2*pad - spanY*scale) / 2;
+
+  const card = document.createElement("div");
+  card.className = "card"; card.id = "track";
+  card.innerHTML = `<div class="chart-head"><h2>Flugweg (GPS)</h2>
+    <span class="stats">Strecke ${fmtDist(dist)} · ${pts.length.toLocaleString("de-AT")} GPS-Punkte · Karte offline — Umriss-Darstellung</span></div>`;
+  const box = document.createElement("div");
+  box.className = "chartbox";
+  const svg = document.createElementNS(svgNS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.style.background = "var(--page)"; svg.style.borderRadius = "8px";
+  box.appendChild(svg);
+
+  const step = Math.max(1, Math.floor(pts.length / 1500));
+  const idxs = [];
+  for (let i = 0; i < pts.length; i += step) idxs.push(i);
+  if (idxs[idxs.length-1] !== pts.length-1) idxs.push(pts.length-1);
+  let d = "";
+  for (const i of idxs) d += (d ? "L" : "M") + X(xs[i]).toFixed(1) + " " + Y(ys[i]).toFixed(1);
+  const path = document.createElementNS(svgNS, "path");
+  path.setAttribute("d", d); path.setAttribute("fill", "none");
+  path.setAttribute("stroke", "var(--s1)"); path.setAttribute("stroke-width", "2");
+  svg.appendChild(path);
+
+  const marker = (x, y, color, label, anchor) => {
+    const c = document.createElementNS(svgNS, "circle");
+    c.setAttribute("cx", x); c.setAttribute("cy", y); c.setAttribute("r", 6);
+    c.setAttribute("fill", color); c.setAttribute("stroke", "var(--surface)"); c.setAttribute("stroke-width", "2");
+    svg.appendChild(c);
+    const t = document.createElementNS(svgNS, "text");
+    t.setAttribute("x", x + (anchor === "end" ? -10 : 10)); t.setAttribute("y", y + 4);
+    t.setAttribute("text-anchor", anchor); t.setAttribute("font-size", "12");
+    t.setAttribute("font-weight", "600"); t.setAttribute("fill", "var(--ink2)");
+    t.textContent = label; svg.appendChild(t);
+  };
+  marker(X(xs[0]), Y(ys[0]), "var(--good)", "Start", "start");
+  marker(X(xs[xs.length-1]), Y(ys[ys.length-1]), "var(--crit)", "Ende", "end");
+
+  const hov = document.createElementNS(svgNS, "circle");
+  hov.setAttribute("r", 6.5); hov.setAttribute("fill", "var(--s6)");
+  hov.setAttribute("stroke", "var(--surface)"); hov.setAttribute("stroke-width", "2");
+  hov.style.display = "none";
+  svg.appendChild(hov);
+  const tip = document.createElement("div");
+  tip.className = "tip"; box.appendChild(tip);
+  card.appendChild(box);
+
+  svg.addEventListener("pointermove", ev => {
+    const pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
+    const p = pt.matrixTransform(svg.getScreenCTM().inverse());
+    let best = -1, bd = Infinity;
+    for (const i of idxs){
+      const dx = X(xs[i]) - p.x, dy = Y(ys[i]) - p.y;
+      const dd = dx*dx + dy*dy;
+      if (dd < bd){ bd = dd; best = i; }
+    }
+    if (best < 0 || bd > 90*90){ hov.style.display = "none"; tip.style.display = "none"; return; }
+    const r = pts[best];
+    hov.setAttribute("cx", X(xs[best])); hov.setAttribute("cy", Y(ys[best]));
+    hov.style.display = "";
+    tip.innerHTML = tipHtml(r);
+    tip.style.display = "block";
+    const bb = box.getBoundingClientRect();
+    const px = (X(xs[best]) / W) * bb.width, py = (Y(ys[best]) / H) * bb.height;
+    tip.style.left = Math.min(Math.max(4, px + 16), bb.width - tip.offsetWidth - 4) + "px";
+    tip.style.top = Math.max(4, Math.min(py - 10, bb.height - tip.offsetHeight - 4)) + "px";
+  });
+  svg.addEventListener("pointerleave", () => { hov.style.display = "none"; tip.style.display = "none"; });
+  return card;
+}
+
+function niceTicks(lo, hi, n){
+  const span = hi - lo;
+  const step0 = span / n;
+  const mag = Math.pow(10, Math.floor(Math.log10(step0)));
+  const step = [1,2,2.5,5,10].map(m => m*mag).find(s => span/s <= n+1) || 10*mag;
+  const out = [];
+  for (let v = Math.ceil(lo/step)*step; v <= hi + 1e-9; v += step) out.push(+v.toFixed(6));
+  return out;
+}
+function niceTimeStep(span){
+  for (const s of [60,120,300,600,900,1200,1800,3600,7200]) if (span / s <= 10) return s;
+  return 14400;
+}
+})();
+
+/* Headless-Export für Tests */
+</script>
+</body>
+</html>

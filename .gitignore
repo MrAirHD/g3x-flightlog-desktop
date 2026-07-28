@@ -1,0 +1,7 @@
+node_modules/
+release/
+dist/
+*.log
+_url.txt
+_run.mjs
+.data/

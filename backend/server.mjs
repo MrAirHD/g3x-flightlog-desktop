@@ -1,0 +1,127 @@
+// Lokales Backend für die Desktop-App (Electron). Kein Login, nur an 127.0.0.1
+// gebunden. Speichert in einem frei wählbaren Datenordner. Wiederverwendet
+// denselben Parser (core) und dieselbe Ingest-Pipeline wie die Server-Version.
+import Fastify from "fastify";
+import multipart from "@fastify/multipart";
+import fstatic from "@fastify/static";
+import { promises as fs, createReadStream } from "node:fs";
+import { createRequire } from "node:module";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { makeJsonStore } from "./store-json.mjs";
+import { makeIngest } from "./ingest.mjs";
+
+const require = createRequire(import.meta.url);
+const core = require("../core/g3x-core.cjs");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(__dirname, "..");
+
+// Startet ein Backend für genau einen Datenordner. Rückgabe: { url, port, close, scan, dataDir }.
+export async function createBackend({ dataDir, host = "127.0.0.1", port = 0, scanIntervalMs = 10000, quietMs = 2500 } = {}) {
+  const dirs = {
+    ingest:  path.join(dataDir, "ingest"),
+    archive: path.join(dataDir, "archive"),
+    uploads: path.join(dataDir, "uploads"),
+  };
+  const stateDir = path.join(dataDir, "state");
+  for (const d of [...Object.values(dirs), stateDir]) await fs.mkdir(d, { recursive: true });
+
+  const store = makeJsonStore(path.join(stateDir, "store.json"));
+  const app = Fastify({ logger: false });
+  await app.register(multipart, { limits: { fileSize: 200 * 1024 * 1024, files: 500 } });
+
+  const ingest = makeIngest({ store, core, dirs, quietMs, log: () => {} });
+
+  // ---- API ----
+  app.get("/api/me", async () => ({ authed: true, needsPassword: false }));
+  app.get("/api/health", async () => ({ ok: true }));
+
+  app.get("/api/flights", async (req) => {
+    const q = req.query || {};
+    return store.list({
+      type: q.type || "all", month: q.month || "all",
+      warnOnly: q.warnOnly === "1" || q.warnOnly === "true",
+      sort: q.sort === "asc" ? "asc" : "desc",
+      offset: Math.max(0, parseInt(q.offset) || 0),
+      limit: Math.min(5000, Math.max(1, parseInt(q.limit) || 300)),
+    });
+  });
+  app.get("/api/stats", async () => ({ ...store.stats(), months: store.months(), errors: store.errors().length }));
+  app.get("/api/errors", async () => store.errors());
+
+  app.get("/api/flights/:id", async (req, reply) => {
+    const r = store.get(req.params.id);
+    if (!r) return reply.code(404).send({ error: "not_found" });
+    return { id: r.id, name: r.name, typeOverride: r.typeOverride || null, summary: r.summary };
+  });
+  app.get("/api/flights/:id/raw", async (req, reply) => {
+    const r = store.get(req.params.id);
+    if (!r) return reply.code(404).send({ error: "not_found" });
+    try { await fs.access(r.archivedPath); }
+    catch { return reply.code(410).send({ error: "archive_missing" }); }
+    reply.header("content-type", "text/csv; charset=utf-8");
+    return reply.send(createReadStream(r.archivedPath));
+  });
+  app.patch("/api/flights/:id", async (req, reply) => {
+    const r = store.get(req.params.id);
+    if (!r) return reply.code(404).send({ error: "not_found" });
+    const val = (req.body && req.body.typeOverride) || null;
+    if (val && !["flight", "ground", "panel"].includes(val)) return reply.code(400).send({ error: "bad_type" });
+    store.setOverride(req.params.id, val);
+    return { ok: true, typeOverride: val };
+  });
+  app.delete("/api/flights/:id", async (req, reply) => {
+    const r = store.get(req.params.id);
+    if (!r) return reply.code(404).send({ error: "not_found" });
+    store.remove(req.params.id);
+    try { await fs.unlink(r.archivedPath); } catch {}
+    return { ok: true };
+  });
+
+  app.post("/api/rescan", async () => ({ ok: true, counts: await ingest.scan() }));
+
+  app.post("/api/upload", async (req) => {
+    let saved = 0;
+    for await (const part of req.parts()) {
+      if (part.type !== "file") continue;
+      if (!part.filename || !part.filename.toLowerCase().endsWith(".csv")) { part.file.resume(); continue; }
+      const safe = "up_" + Date.now() + "_" + part.filename.replace(/[^A-Za-z0-9._-]/g, "_");
+      const dest = path.join(dirs.uploads, safe);
+      const chunks = [];
+      for await (const ch of part.file) chunks.push(ch);
+      await fs.writeFile(dest + ".part", Buffer.concat(chunks));
+      await fs.rename(dest + ".part", dest);
+      saved++;
+    }
+    return { ok: true, saved, counts: await ingest.scan() };
+  });
+
+  // Schreibprobe (lokal praktisch immer ok, aber der Status wird im UI genutzt).
+  let archiveWritable = true;
+  try { const p = path.join(dirs.archive, ".write-test"); await fs.writeFile(p, "ok"); await fs.unlink(p); }
+  catch { archiveWritable = false; }
+  app.get("/api/status", async () => ({ archiveWritable, dataDir, ingest: dirs.ingest, archive: dirs.archive }));
+
+  // ---- Statik: SPA + geteilter Core + vendored Leaflet ----
+  await app.register(fstatic, { root: path.join(ROOT, "app"), prefix: "/", index: ["index.html"] });
+  app.get("/g3x-core.js", async (_req, reply) => {
+    reply.type("application/javascript");
+    return reply.send(createReadStream(path.join(ROOT, "core", "g3x-core.cjs")));
+  });
+
+  await ingest.scan();
+  const timer = setInterval(() => ingest.scan().catch(() => {}), scanIntervalMs);
+
+  await app.listen({ port, host });
+  const actualPort = app.server.address().port;
+
+  return {
+    url: `http://${host}:${actualPort}`,
+    port: actualPort,
+    dataDir,
+    dirs,
+    scan: () => ingest.scan(),
+    async close() { clearInterval(timer); try { await store.flush(); } catch {} await app.close(); },
+  };
+}
