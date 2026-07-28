@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "description": "G3X Flugbuch & Motoranalyse — 100% lokale Desktop-App (Rotax 915 iS)",
+  "author": "Maximilian Rabl <maximilian.rabl@gmx.at>",
+  "license": "UNLICENSED",
   "main": "electron/main.cjs",
   "scripts": {
     "start": "electron .",
