@@ -26,6 +26,13 @@ iS). No cloud, no server, no login. Pick a data folder, drag & drop CSVs in, don
 
 ## Installer bauen (erzeugt die .exe)
 Voraussetzung: Node.js 18+ und Windows.
+
+> **Einmalig nötig:** Windows **Entwicklermodus** einschalten
+> (*Einstellungen → Datenschutz & Sicherheit → Für Entwickler → Entwicklermodus:
+> Ein*) **oder** das Terminal **als Administrator** öffnen. Grund: electron-builder
+> entpackt sein Signatur-Werkzeug mit Symlinks, was sonst am fehlenden Recht
+> scheitert. Ohne das bricht `npm run dist` beim Schritt „winCodeSign" ab.
+
 ```bash
 npm install
 npm run dist        # -> release\G3X-Flugbuch-Setup-1.0.0.exe
@@ -33,6 +40,11 @@ npm run dist        # -> release\G3X-Flugbuch-Setup-1.0.0.exe
 Der **Installer fragt beim Start nach der Sprache (English / Deutsch)** und lässt
 den Installationsordner wählen (kein „One-Click"). Danach liegt „G3X Flugbuch" im
 Startmenü und auf dem Desktop.
+
+Nur die App als Ordner (ohne Installer, umgeht das obige Recht) zum Ausprobieren:
+```bash
+npm run dist -- --dir     # -> release\win-unpacked\G3X Flugbuch.exe
+```
 
 *Build the installer with `npm run dist`; the NSIS setup asks for its language
 (English/German) at launch.*
