@@ -96,6 +96,10 @@ export async function createBackend({ dataDir, stateFile, host = "127.0.0.1", po
       for await (const ch of part.file) chunks.push(ch);
       await fs.writeFile(target + ".part", Buffer.concat(chunks));
       await fs.rename(target + ".part", target);
+      // Datei ist atomar geschrieben, also vollständig -> Änderungsdatum bewusst
+      // zurückdatieren, damit die Ruhephase (Schutz vor halb kopierten Dateien)
+      // sie nicht überspringt und sie SOFORT im nächsten Scan erscheint.
+      try { const past = new Date(Date.now() - quietMs - 5000); await fs.utimes(target, past, past); } catch {}
       saved++;
     }
     return { ok: true, saved, counts: await scanner.scan() };

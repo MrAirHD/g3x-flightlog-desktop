@@ -70,6 +70,23 @@ let gone = false; try { await fs.stat(path.join(folder, "log_a.csv")); } catch {
 ok(gone, "Löschen in der App entfernt die CSV aus dem Ordner");
 await be2.close();
 
+// Upload muss SOFORT erscheinen, auch bei aktiver Ruhephase (Drag&drop-Bug)
+const folderQ = path.join(tmp, "Quiet");
+const stateQ = path.join(tmp, "appdataQ", "idx.json");
+await fs.mkdir(folderQ, { recursive: true });
+const beQ = await createBackend({ dataDir: folderQ, stateFile: stateQ, quietMs: 3000, scanIntervalMs: 999999 });
+const jq = async (p, opt) => (await fetch(beQ.url + p, opt)).json();
+const fdQ = new FormData();
+fdQ.append("file", new Blob([sample], { type: "text/csv" }), "sofort.csv");
+const upQ = await jq("/api/upload", { method: "POST", body: fdQ });
+ok(upQ.counts.new === 1, `Upload erscheint SOFORT trotz Ruhephase (${JSON.stringify(upQ.counts)})`);
+ok((await jq("/api/flights")).total === 1, "hochgeladener Flug direkt in der Liste");
+// Eine „von außen“ frisch abgelegte Datei bleibt dagegen kurz in der Ruhephase
+await fs.writeFile(path.join(folderQ, "frisch.csv"), sample.toString("utf8").replace(/2026-05-16/g, "2026-05-20"));
+const c2 = await jq("/api/rescan", { method: "POST" });
+ok(c2.counts.new === 0, `frisch extern abgelegte Datei wartet Ruhephase ab (${JSON.stringify(c2.counts)})`);
+await beQ.close();
+
 await fs.rm(tmp, { recursive: true, force: true });
 console.log(fails ? `\n${fails} FEHLER` : "\nAlle Tests bestanden");
 process.exit(fails ? 1 : 0);
