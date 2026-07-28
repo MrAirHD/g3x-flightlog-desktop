@@ -158,6 +158,15 @@ button.btn.primary:hover{color:#fff;filter:brightness(1.05)}
   font-size:12px;max-width:60ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #desktopBar .btn{padding:5px 12px}
 #desktopBar .spacer{flex:1}
+#settingsBtn{font-size:16px;padding:6px 12px;line-height:1}
+#settingsModal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:2500}
+.modal-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:22px 24px;width:min(400px,94vw);box-shadow:0 10px 40px rgba(0,0,0,.3)}
+.modal-card h2{margin:0 0 14px}
+.set-row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:6px 0}
+.set-row label{color:var(--ink2)}
+.set-row select{background:var(--page);color:var(--ink);border:1px solid var(--axis);border-radius:8px;padding:6px 10px;min-width:110px}
+.set-sep{height:1px;background:var(--grid);margin:8px 0}
+.modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:16px}
 #toasts{position:fixed;right:16px;bottom:16px;z-index:3000;display:flex;flex-direction:column;gap:10px;max-width:min(420px,92vw)}
 .toast{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--s1);
   border-radius:10px;padding:11px 14px;box-shadow:0 6px 24px rgba(0,0,0,.18);font-size:13.5px;color:var(--ink);
@@ -183,11 +192,37 @@ button.btn.primary:hover{color:#fff;filter:brightness(1.05)}
 
 <div class="wrap" id="app" style="display:none">
   <header class="top">
-    <h1>G3X Flugbuch & Motoranalyse</h1>
-    <span class="sub">Rotax 915 iS · Grenzwerte lt. Operators Manual OM-915 i A</span>
+    <h1 id="appTitle">G3X Flugbuch &amp; Motoranalyse</h1>
+    <span class="sub" id="appSub">Rotax 915 iS · Grenzwerte lt. Operators Manual OM-915 i A</span>
     <span class="spacer" style="flex:1"></span>
+    <button class="btn" id="settingsBtn" title="Einstellungen">⚙</button>
     <button class="btn" id="logoutBtn" style="display:none">Abmelden</button>
   </header>
+
+  <div id="settingsModal" style="display:none">
+    <div class="modal-card">
+      <h2 id="setTitle">Einstellungen</h2>
+      <div class="set-row"><label id="setLangLbl">Sprache</label>
+        <select id="setLang"><option value="de">Deutsch</option><option value="en">English</option></select></div>
+      <div class="set-sep"></div>
+      <div class="set-row"><label id="setTempLbl">Temperatur</label>
+        <select id="u_temp"><option value="C">°C</option><option value="F">°F</option></select></div>
+      <div class="set-row"><label id="setPressLbl">Druck</label>
+        <select id="u_press"><option value="psi">psi</option><option value="bar">bar</option></select></div>
+      <div class="set-row"><label id="setMapLbl">Ladedruck</label>
+        <select id="u_map"><option value="inHg">inHg</option><option value="hPa">hPa</option></select></div>
+      <div class="set-row"><label id="setAltLbl">Höhe</label>
+        <select id="u_alt"><option value="ft">ft</option><option value="m">m</option></select></div>
+      <div class="set-row"><label id="setSpeedLbl">Geschwindigkeit</label>
+        <select id="u_speed"><option value="kt">kt</option><option value="kmh">km/h</option><option value="mph">mph</option></select></div>
+      <div class="set-row"><label id="setFuelLbl">Verbrauch</label>
+        <select id="u_fuel"><option value="lph">l/h</option><option value="gph">gal/h</option></select></div>
+      <div class="modal-actions">
+        <button class="btn" id="setCancel">Abbrechen</button>
+        <button class="btn primary" id="setSave">Speichern</button>
+      </div>
+    </div>
+  </div>
   <div id="meta"></div>
 
   <div id="desktopBar" style="display:none">
@@ -198,8 +233,8 @@ button.btn.primary:hover{color:#fff;filter:brightness(1.05)}
   </div>
 
   <div id="drop" tabindex="0">
-    <b>G3X-Logdateien (CSV) hierher ziehen</b> oder klicken zum Auswählen — auch mehrere auf einmal
-    <div class="small">Die Dateien werden zum Server hochgeladen, dort dem Archiv hinzugefügt und erscheinen nach dem Einlesen in der Übersicht.</div>
+    <b id="dropTitle">G3X-Logdateien (CSV) hierher ziehen</b> <span id="dropMid">oder klicken zum Auswählen — auch mehrere auf einmal</span>
+    <div class="small" id="dropSmall">Die Dateien werden in deinen CSV-Ordner kopiert. Du kannst CSVs auch direkt in diesen Ordner legen — sie erscheinen automatisch.</div>
     <input type="file" id="file" accept=".csv,text/csv" multiple style="display:none">
   </div>
 
@@ -219,7 +254,7 @@ button.btn.primary:hover{color:#fff;filter:brightness(1.05)}
       <div class="filters">
         <div class="chips" id="typeChips"></div>
         <select class="flightsel" id="monthSel"></select>
-        <label class="chk"><input type="checkbox" id="warnOnly"> nur mit Warnungen</label>
+        <label class="chk"><input type="checkbox" id="warnOnly"> <span id="warnOnlyLbl">nur mit Warnungen</span></label>
         <span class="spacer"></span>
         <button class="btn" id="sortBtn"></button>
       </div>
@@ -276,6 +311,176 @@ if (typeof document !== "undefined") (function(){
 
 const $ = s => document.querySelector(s);
 const drop = $("#drop"), fileInp = $("#file");
+
+/* ============ Einstellungen (Sprache + Einheiten) ============ */
+const cfg = { lang: "de", units: { temp:"C", press:"psi", map:"inHg", alt:"ft", speed:"kt", fuel:"lph" } };
+
+/* ---- Übersetzung: Schlüssel = deutscher Text ---- */
+const DICT = {
+  "G3X Flugbuch & Motoranalyse": "G3X Flight Log & Engine Analysis",
+  "Rotax 915 iS · Grenzwerte lt. Operators Manual OM-915 i A": "Rotax 915 iS · limits per Operator's Manual OM-915 i A",
+  "Abmelden": "Sign out",
+  "CSV-Ordner:": "CSV folder:",
+  "Ordner ändern": "Change folder", "Im Explorer öffnen": "Open in Explorer",
+  "Einstellungen": "Settings", "Sprache": "Language", "Einheiten": "Units",
+  "Temperatur": "Temperature", "Druck": "Pressure", "Ladedruck": "Manifold pressure",
+  "Höhe": "Altitude", "Geschwindigkeit": "Speed", "Verbrauch": "Fuel flow",
+  "Speichern": "Save", "Abbrechen": "Cancel", "Schließen": "Close",
+  "G3X-Logdateien (CSV) hierher ziehen": "Drag G3X log files (CSV) here",
+  "oder klicken zum Auswählen — auch mehrere auf einmal": "or click to choose — several at once too",
+  "Die Dateien werden in deinen CSV-Ordner kopiert. Du kannst CSVs auch direkt in diesen Ordner legen — sie erscheinen automatisch.":
+    "Files are copied into your CSV folder. You can also drop CSVs straight into that folder — they show up automatically.",
+  "Übersicht": "Overview", "Grenzwert-Überschreitungen": "Limit exceedances",
+  "CAS-Meldungen (G3X)": "CAS messages (G3X)", "Zeitleiste": "Timeline",
+  "Nicht dargestellte Spalten": "Columns not shown",
+  "Referenzwerte Rotax 915 iS": "Reference values Rotax 915 iS",
+  "Logs gesamt": "Logs total", "Motorlaufzeit": "Engine running time", "Strecke gesamt": "Distance total",
+  "Überschreitungen": "Exceedances", "Höchste Öltemp.": "Peak oil temp.",
+  "Höchste Drehzahl": "Peak RPM", "Größte Höhe": "Peak altitude",
+  "Alle": "All", "✈️ Flüge": "✈️ Flights", "🔧 Standläufe": "🔧 Ground runs", "🔌 Nur Avionik": "🔌 Avionics only",
+  "Alle Monate": "All months", "nur mit Warnungen": "only with warnings",
+  "↑ Älteste zuerst": "↑ Oldest first", "↓ Neueste zuerst": "↓ Newest first",
+  "🔄 Eingangsordner neu einlesen": "🔄 Rescan folder", "🔄 Wird eingelesen …": "🔄 Scanning …",
+  "Alle Flüge": "All flights", "Alle Werte im grünen Bereich": "All values in the green",
+  "Keine CAS-Meldungen im Log.": "No CAS messages in the log.",
+  "Motor": "Engine", "Flugweg & GPS": "Track & GPS", "Fluglage & Beschleunigung": "Attitude & acceleration",
+  "Kurs & Wind": "Heading & wind", "Höhe & Atmosphäre": "Altitude & atmosphere",
+  "GPS-Qualität": "GPS quality", "Navigation & Autopilot": "Navigation & autopilot",
+  "Weitere Messwerte": "Other measurements", "Status & Ereignisse": "Status & events",
+  "Zustandsänderungen": "State changes",
+  "Drehzahl": "RPM", "Ladedruck (MAP)": "Manifold pressure (MAP)",
+  "Öl- und Kühlmitteltemperatur": "Oil & coolant temperature", "Öltemperatur": "Oil temperature", "Kühlmittel": "Coolant",
+  "Ansaugluft- und Außentemperatur": "Intake-air & outside temperature", "Ansaugluft": "Intake air", "Außentemperatur": "Outside air",
+  "Öldruck": "Oil pressure", "Kraftstoffdruck": "Fuel pressure",
+  "Abgastemperaturen (EGT)": "Exhaust gas temperatures (EGT)", "EGT-Split (max − min)": "EGT split (max − min)",
+  "Bordspannung": "Bus voltage", "Batteriestrom": "Battery current", "Spannung": "Voltage", "Strom": "Current",
+  "Baro-Höhe": "Baro altitude", "GPS-Höhe": "GPS altitude", "Groundspeed (GPS)": "Groundspeed (GPS)",
+  "Parameter": "Parameter", "Grün (normal)": "Green (normal)", "Gelb (Vorsicht)": "Yellow (caution)",
+  "Rot (Limit)": "Red (limit)", "Anmerkung": "Note",
+  "Ganzes Log": "◱ Full log", "✂ Nur Motorlaufzeit": "✂ Engine time only", "◱ Ganzes Log": "◱ Full log",
+  "🖨 Als PDF drucken": "🖨 Print as PDF", "← Übersicht": "← Overview",
+  "Flug": "Flight", "Standlauf": "Ground run", "Nur Avionik": "Avionics only",
+  "über Limit": "above limit", "im Vorwarnbereich": "in caution zone",
+  "nur Avionik, Motor lief nicht": "avionics only, engine not running",
+  "rote Phasen": "red phases", "gelbe Phasen": "yellow phases", "alles im grünen Bereich": "all in the green",
+  "Diesen Log entfernen": "Remove this log",
+  "Keine Daten in diesem Log.": "No data in this log.",
+  "Zeit": "Time", "Höhe über Grund": "Height above ground",
+  "Klick auf einen Track öffnet den Flug. Kartendaten © OpenStreetMap-Mitwirkende.":
+    "Click a track to open the flight. Map data © OpenStreetMap contributors.",
+  "Kartendaten © OpenStreetMap-Mitwirkende (Kacheln werden aus dem Internet geladen).":
+    "Map data © OpenStreetMap contributors (tiles loaded from the internet).",
+  "Flugweg (GPS)": "Track (GPS)",
+  "Auto": "Auto",
+  "MAP": "MAP", "Fuel Flow": "Fuel flow", "EGT-Split": "EGT split", "IAS": "IAS",
+  "Farbzonen: Öltemperatur (blau = unter 50 °C, Start/Warmlauf)": "Colour zones: oil temperature (blue = below 50 °C, start/warm-up)",
+  "Farbzonen: Ansauglufttemperatur": "Colour zones: intake-air temperature",
+  "Für Textspalten (Modi, Statuswerte) wird jede Änderung mit Uhrzeit gelistet — ein Liniendiagramm ergibt hier keinen Sinn.":
+    "For text columns (modes, status) each change is listed with its time — a line chart makes no sense here.",
+  "Steig-/Sinkrate": "Vertical speed", "Beschleunigung": "Acceleration",
+  "Fluglage (Pitch/Roll)": "Attitude (pitch/roll)", "Pitch": "Pitch", "Roll": "Roll",
+  "Vertikal (Normal)": "Vertical (normal)", "Seitlich (Lateral)": "Lateral",
+  "Anstellwinkel (AOA)": "Angle of attack (AOA)", "AOA (normiert)": "AOA (normalised)",
+  "AHRS-Vergleich Pitch/Roll": "AHRS comparison pitch/roll", "Pitch-Differenz": "Pitch delta", "Roll-Differenz": "Roll delta",
+  "AHRS-Abweichung": "AHRS deviation", "Steuerkurs & Track": "Heading & track", "Steuerkurs (mag.)": "Heading (mag.)",
+  "GPS-Track": "GPS track", "Windgeschwindigkeit": "Wind speed", "Wind": "Wind", "Windrichtung": "Wind direction",
+  "Missweisung": "Magnetic variation", "Druck- und Dichtehöhe": "Pressure & density altitude",
+  "Druckhöhe": "Pressure altitude", "Dichtehöhe": "Density altitude", "AGL": "AGL",
+  "QNH (Baro Setting)": "QNH (baro setting)", "QNH": "QNH", "Satelliten": "Satellites",
+  "Positionsgenauigkeit (HFOM/VFOM)": "Position accuracy (HFOM/VFOM)", "horizontal (HFOM)": "horizontal (HFOM)", "vertikal (VFOM)": "vertical (VFOM)",
+  "GPS-Geschwindigkeitskomponenten": "GPS velocity components", "Ost": "East", "Nord": "North", "vertikal": "vertical",
+  "Nav-Entfernung": "Nav distance", "Entfernung": "Distance", "Nav-Peilung & -Kurs": "Nav bearing & course",
+  "Peilung": "Bearing", "Kurs": "Course", "Querablage (XTK)": "Cross-track (XTK)", "Querablage": "Cross-track",
+  "CDI-Ablagen": "CDI deflections", "Vorwahl Steuerkurs": "Selected heading", "Vorwahl Höhe": "Selected altitude",
+  "Vorwahl Steig-/Sinkrate": "Selected vertical speed", "Vorwahl Geschwindigkeit": "Selected airspeed",
+  "Flight-Director-Kommandos": "Flight-director commands", "Autopilot-Kommandos": "Autopilot commands",
+  "Autopilot-Servomomente": "Autopilot servo torque", "Höhenrudertrimmung": "Elevator trim", "Trimmung": "Trim",
+  "Im Log leer": "Empty in the log", "Bewusst ausgelassen:": "Deliberately omitted:",
+  "Öltemp.": "Oil temp.", "Groundspeed": "Groundspeed", "Drehzahl": "RPM",
+  "Start": "Start", "Ende": "End",
+  "Keine CSV ausgewählt": "No CSV selected", "Bitte G3X-Logdateien (.csv) wählen.": "Please choose G3X log files (.csv).",
+  "Upload fehlgeschlagen": "Upload failed", "Scan fehlgeschlagen": "Scan failed",
+  "Flug konnte nicht geladen werden": "Could not load flight", "Löschen fehlgeschlagen": "Delete failed",
+  "Eingangsordner eingelesen": "Folder scanned", "Ordner nicht beschreibbar": "Folder not writable",
+};
+const enq = () => cfg.lang === "en";
+function T(de){ return cfg.lang === "en" && DICT[de] != null ? DICT[de] : de; }
+const WD = { de:["So","Mo","Di","Mi","Do","Fr","Sa"], en:["Sun","Mon","Tue","Wed","Thu","Fri","Sat"] };
+function fmtDateL(iso){
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
+  const [y,m,d] = iso.split("-");
+  const wd = WD[cfg.lang][new Date(+y, m-1, +d).getDay()];
+  return cfg.lang === "en" ? `${wd}, ${m}/${d}/${y}` : `${wd}, ${d}.${m}.${y}`;
+}
+/* Zahl gemäß Sprache formatieren (Dezimaltrenner) */
+function nf(v, dec){
+  if (v == null) return "–";
+  return v.toLocaleString(cfg.lang === "en" ? "en-US" : "de-AT",
+    { minimumFractionDigits: dec, maximumFractionDigits: dec });
+}
+
+/* ---- Maßeinheiten-Umrechnung ---- */
+const DIM = { map:"map", oilT:"temp", coolT:"temp", manT:"temp", oat:"temp",
+  egt:"temp", egt1:"temp", egt2:"temp", egt3:"temp", egt4:"temp", egtSplit:"tdiff",
+  oilP:"press", fuelP:"press", alt:"alt", gpsAlt:"alt", gndSpd:"speed", ias:"speed", ff:"fuel" };
+const CONV = {
+  temp: v => cfg.units.temp === "F" ? v*9/5+32 : v,
+  tdiff: v => cfg.units.temp === "F" ? v*9/5 : v,
+  press: v => cfg.units.press === "bar" ? v*0.0689476 : v,
+  map: v => cfg.units.map === "hPa" ? v*33.8639 : v,
+  alt: v => cfg.units.alt === "m" ? v*0.3048 : v,
+  speed: v => cfg.units.speed === "kmh" ? v*1.852 : cfg.units.speed === "mph" ? v*1.150779 : v,
+  fuel: v => cfg.units.fuel === "gph" ? v*0.264172 : v,
+};
+const ULAB = {
+  temp: () => cfg.units.temp === "F" ? "°F" : "°C",
+  tdiff: () => cfg.units.temp === "F" ? "°F" : "°C",
+  press: () => cfg.units.press === "bar" ? "bar" : "psi",
+  map: () => cfg.units.map === "hPa" ? "hPa" : "inHg",
+  alt: () => cfg.units.alt === "m" ? "m" : "ft",
+  speed: () => ({ kt:"kt", kmh:"km/h", mph:"mph" })[cfg.units.speed],
+  fuel: () => cfg.units.fuel === "gph" ? "gal/h" : "l/h",
+};
+const UDEC = { temp:b=>b, tdiff:b=>b, press:b=> cfg.units.press==="bar"?2:b,
+  map:b=> cfg.units.map==="hPa"?0:b, alt:()=>0, speed:()=>0, fuel:()=>1 };
+const dimOf = key => DIM[key] || null;
+const convV = (key, v) => { const d = dimOf(key); return (v == null || !d) ? v : CONV[d](v); };
+const unitOf = (key, fallback) => { const d = dimOf(key); return d ? ULAB[d]() : (fallback || ""); };
+const decOf = (key, base) => { const d = dimOf(key); return d ? UDEC[d](base) : base; };
+/* Wert konvertiert + formatiert (ohne Einheit) */
+const fmtV = (key, v, base) => nf(convV(key, v), decOf(key, base));
+
+/* Englische Labels/Notes zu den Rotax-Grenzwerten (Core bleibt deutsch) */
+const LIMIT_EN = {
+  rpm:{label:"RPM", note:"max. 5800 rpm (up to 5 min), continuous 5500 rpm, idle min. 1800 rpm"},
+  map:{label:"Manifold pressure", note:"max. 51 inHg (1730 hPa); target at takeoff ≈ 44.9 inHg (1520 hPa) — caution zone derived"},
+  oilT:{label:"Oil temperature", note:"operation 50–130 °C, recommended 90–110 °C; take off only above 50 °C"},
+  coolT:{label:"Coolant temperature", note:"max. 120 °C; caution zone from 108 °C derived"},
+  manT:{label:"Intake-air temperature", note:"max. 80 °C; above 50 °C reduced critical altitude"},
+  oilP:{label:"Oil pressure", note:"normal 29–72.5 psi (above 3500 rpm); min. 11.6 psi below 3500 rpm; max. 101.5 psi at cold start"},
+  fuelP:{label:"Fuel pressure", note:"fuel rail 42–45 psi; 36–51 psi only briefly (max. 3 s) after power change"},
+  egt:{label:"Exhaust gas temperature (EGT)", note:"max. 950 °C; caution zone from 880 °C derived"},
+  egtSplit:{label:"EGT split", note:"max. 200 °C (at fuel flow > 3 l/h); caution zone derived"},
+  ff:{label:"Fuel flow", note:"informational"},
+  amps:{label:"Battery current", note:"informational"},
+  volts:{label:"Bus voltage", note:"guideline values (not Rotax): charging ≈ 13.8–14.4 V"},
+  oat:{label:"Outside air temperature", note:"operation -40 to +50 °C"},
+  alt:{label:"Baro altitude", note:"GPS altitude (WGS84) and barometric altitude can differ by design"},
+  gpsAlt:{label:"GPS altitude", note:""},
+  gndSpd:{label:"Groundspeed", note:"groundspeed via GPS, IAS from pitot"},
+  ias:{label:"IAS", note:""},
+};
+function labelOf(key){
+  if (cfg.lang === "en"){
+    if (LIMIT_EN[key]) return LIMIT_EN[key].label;
+    if (/^egt[1-4]$/.test(key)) return "EGT " + key.slice(-1);
+  }
+  return (LIMITS[key] && LIMITS[key].label) || key;
+}
+function noteOf(key){
+  if (cfg.lang === "en" && LIMIT_EN[key]) return LIMIT_EN[key].note;
+  return (LIMITS[key] && LIMITS[key].note) || "";
+}
 
 /* HTML-Escaping für alle aus der CSV stammenden Strings, die per innerHTML in
    die Seite geschrieben werden (Feldwerte, Spaltennamen, Datum, CAS-Texte …) —
@@ -360,25 +565,25 @@ async function addFiles(files){
   const fd = new FormData();
   let n = 0;
   for (const f of files){ if (f.name.toLowerCase().endsWith(".csv")){ fd.append("file", f); n++; } }
-  if (!n){ toast("Keine CSV ausgewählt", "Bitte G3X-Logdateien (.csv) wählen.", "warn"); return; }
+  if (!n){ toast(T("Keine CSV ausgewählt"), T("Bitte G3X-Logdateien (.csv) wählen."), "warn"); return; }
   const prev = drop.innerHTML;
-  drop.innerHTML = `<b>${n} Datei(en) werden hochgeladen …</b>`;
+  drop.innerHTML = `<b>${n} ${enq()?"file(s) uploading …":"Datei(en) werden hochgeladen …"}</b>`;
   try {
     const res = await api("/api/upload", { method:"POST", body: fd });
     const c = res.counts || { new:0, dup:0, error:0 };
     await refresh();
-    reportScan(c, `${res.saved} Datei(en) hochgeladen`);
-  } catch(err){ toast("Upload fehlgeschlagen", err.message, "err", 8000); }
+    reportScan(c, `${res.saved} ${enq()?"file(s) uploaded":"Datei(en) hochgeladen"}`);
+  } catch(err){ toast(T("Upload fehlgeschlagen"), err.message, "err", 8000); }
   finally { drop.innerHTML = prev; }
 }
 
 // Ergebnis eines Scans/Uploads als Toast aufbereiten (inkl. echter Fehlergründe).
 function reportScan(c, prefix){
   const parts = [];
-  if (c.new)   parts.push(`${c.new} neu eingelesen`);
-  if (c.dup)   parts.push(`${c.dup} Duplikat(e) übersprungen`);
-  if (c.error) parts.push(`${c.error} Fehler`);
-  const summary = parts.join(" · ") || "nichts Neues gefunden";
+  if (c.new)   parts.push(`${c.new} ${enq()?"newly read":"neu eingelesen"}`);
+  if (c.dup)   parts.push(`${c.dup} ${enq()?"duplicate(s) skipped":"Duplikat(e) übersprungen"}`);
+  if (c.error) parts.push(`${c.error} ${enq()?"error(s)":"Fehler"}`);
+  const summary = parts.join(" · ") || (enq()?"nothing new found":"nichts Neues gefunden");
   const msgs = (c.messages || []).slice(0, 4).join("\n");
   const type = c.error ? "err" : c.new ? "ok" : "warn";
   toast(prefix, summary + (msgs ? "\n\n" + msgs : ""), type, c.error ? 12000 : 6000);
@@ -410,6 +615,66 @@ async function refresh(){
   showOverview();
 }
 
+// Einstellungen laden (Electron oder localStorage)
+async function loadCfg(){
+  try {
+    if (window.desktop && window.desktop.getInfo){
+      const info = await window.desktop.getInfo();
+      if (info.language) cfg.lang = info.language;
+      if (info.units) cfg.units = { ...cfg.units, ...info.units };
+      return;
+    }
+  } catch {}
+  try { const s = JSON.parse(localStorage.getItem("g3x-cfg") || "{}");
+    if (s.lang) cfg.lang = s.lang; if (s.units) cfg.units = { ...cfg.units, ...s.units }; } catch {}
+}
+function typeLabel(type){ return ({ flight:T("Flug"), ground:T("Standlauf"), panel:T("Nur Avionik") })[type] || type; }
+function applyStaticI18n(){
+  document.documentElement.lang = cfg.lang;
+  $("#appTitle").textContent = T("G3X Flugbuch & Motoranalyse");
+  $("#appSub").textContent = T("Rotax 915 iS · Grenzwerte lt. Operators Manual OM-915 i A");
+  $("#settingsBtn").title = T("Einstellungen");
+  $("#logoutBtn").textContent = T("Abmelden");
+  $("#dropTitle").textContent = T("G3X-Logdateien (CSV) hierher ziehen");
+  $("#dropMid").textContent = T("oder klicken zum Auswählen — auch mehrere auf einmal");
+  $("#dropSmall").textContent = T("Die Dateien werden in deinen CSV-Ordner kopiert. Du kannst CSVs auch direkt in diesen Ordner legen — sie erscheinen automatisch.");
+  const dbl = document.querySelector("#desktopBar .db-label"); if (dbl) dbl.textContent = T("CSV-Ordner:");
+  $("#dbChange").textContent = T("Ordner ändern");
+  $("#dbOpen").textContent = T("Im Explorer öffnen");
+  const wol = $("#warnOnlyLbl"); if (wol) wol.textContent = T("nur mit Warnungen");
+  const rb = $("#rescanBtn"); if (rb) rb.textContent = T("🔄 Eingangsordner neu einlesen");
+  const back = $("#backBtn"); if (back) back.textContent = T("← Übersicht");
+  const pr = document.querySelector('#report .toolbar button[onclick]'); if (pr) pr.textContent = T("🖨 Als PDF drucken");
+  document.querySelectorAll("#overview h2, #report h2").forEach(h => { const k = h.textContent.trim(); if (DICT[k]) h.textContent = T(k); });
+  $("#setTitle").textContent = T("Einstellungen");
+  $("#setLangLbl").textContent = T("Sprache");
+  $("#setTempLbl").textContent = T("Temperatur"); $("#setPressLbl").textContent = T("Druck");
+  $("#setMapLbl").textContent = T("Ladedruck"); $("#setAltLbl").textContent = T("Höhe");
+  $("#setSpeedLbl").textContent = T("Geschwindigkeit"); $("#setFuelLbl").textContent = T("Verbrauch");
+  $("#setCancel").textContent = T("Abbrechen"); $("#setSave").textContent = T("Speichern");
+}
+// Settings-Modal
+$("#settingsBtn").addEventListener("click", () => {
+  $("#setLang").value = cfg.lang;
+  for (const k of ["temp","press","map","alt","speed","fuel"]) $("#u_"+k).value = cfg.units[k];
+  $("#settingsModal").style.display = "flex";
+});
+$("#setCancel").addEventListener("click", () => $("#settingsModal").style.display = "none");
+$("#settingsModal").addEventListener("click", e => { if (e.target.id === "settingsModal") $("#settingsModal").style.display = "none"; });
+$("#setSave").addEventListener("click", async () => {
+  const patch = { language: $("#setLang").value, units: {} };
+  for (const k of ["temp","press","map","alt","speed","fuel"]) patch.units[k] = $("#u_"+k).value;
+  $("#settingsModal").style.display = "none";
+  if (window.desktop && window.desktop.setSettings){
+    await window.desktop.setSettings(patch);         // Electron: speichern + Seite neu laden
+  } else {
+    cfg.lang = patch.language; cfg.units = { ...cfg.units, ...patch.units };
+    try { localStorage.setItem("g3x-cfg", JSON.stringify(cfg)); } catch {}
+    applyStaticI18n();
+    if (state.current >= 0) renderDetail(state.flights[state.current]); else renderOverview();
+  }
+});
+
 // Desktop (Electron): Statusleiste mit Datenordner + Buttons.
 async function initDesktopBar(){
   if (!window.desktop || !window.desktop.isDesktop) return;
@@ -419,8 +684,6 @@ async function initDesktopBar(){
     $("#dbPath").textContent = info.dataDir;
     $("#dbPath").title = info.dataDir;
     bar.style.display = "flex";
-    const small = drop.querySelector(".small");
-    if (small) small.textContent = "Die Dateien werden in deinen CSV-Ordner kopiert. Du kannst CSVs auch direkt in diesen Ordner legen — sie erscheinen automatisch.";
   } catch {}
   $("#dbChange").onclick = () => window.desktop.chooseFolder();   // Backend startet neu + Fenster lädt neu
   $("#dbOpen").onclick = () => window.desktop.openFolder();
@@ -432,12 +695,14 @@ async function boot(){
   catch { showLogin(); return; }
   if (me.needsPassword && !me.authed){ showLogin(); return; }
   hideLogin();
+  await loadCfg();
+  applyStaticI18n();
   $("#logoutBtn").style.display = me.needsPassword ? "" : "none";
   await initDesktopBar();
   try {
     const st = await api("/api/status");
     if (st && st.archiveWritable === false)
-      toast("Archiv nicht beschreibbar", "Der Container kann nicht ins Synology-Archiv schreiben — Uploads/Ordner werden nicht eingelesen. Rechte am Mount prüfen (Container läuft als uid 1000).", "err", 15000);
+      toast(T("Ordner nicht beschreibbar"), enq()?"The app cannot write to your CSV folder — files are not read. Check the folder permissions or pick another folder.":"Die App kann nicht in deinen CSV-Ordner schreiben — Dateien werden nicht eingelesen. Rechte prüfen oder anderen Ordner wählen.", "err", 15000);
   } catch {}
   const openHash = location.hash.match(/^#f=(.+)/);   // vor showOverview sichern
   try { await loadAll(); } catch(e){ console.error(e); return; }
@@ -463,7 +728,7 @@ async function showFlight(idx){
     try {
       const text = await api(`/api/flights/${encodeURIComponent(fl.id)}/raw`);
       fl.parsed = parseG3X(text);
-    } catch(e){ toast("Flug konnte nicht geladen werden", e.message, "err", 8000); return; }
+    } catch(e){ toast(T("Flug konnte nicht geladen werden"), e.message, "err", 8000); return; }
   }
   destroyMaps();
   $("#overview").style.display = "none";
@@ -483,13 +748,13 @@ $("#fullBtn").addEventListener("click", () => {
 });
 $("#rescanBtn").addEventListener("click", async () => {
   const btn = $("#rescanBtn"), t = btn.textContent;
-  btn.disabled = true; btn.textContent = "🔄 Wird eingelesen …";
+  btn.disabled = true; btn.textContent = enq() ? "🔄 Scanning …" : "🔄 Wird eingelesen …";
   try {
     const res = await api("/api/rescan", { method:"POST" });
     const c = res.counts || { new:0, dup:0, error:0 };
     await refresh();
-    reportScan(c, "Eingangsordner eingelesen");
-  } catch(err){ toast("Scan fehlgeschlagen", err.message, "err", 8000); }
+    reportScan(c, T("Eingangsordner eingelesen"));
+  } catch(err){ toast(T("Scan fehlgeschlagen"), err.message, "err", 8000); }
   finally { btn.disabled = false; btn.textContent = t; }
 });
 
@@ -512,19 +777,19 @@ function renderOverview(){
   const total = (k) => S.reduce((s,x) => s + (x[k] || 0), 0);
   const chron = [...S].sort((a,b) => a.startTs - b.startTs);
   $("#meta").textContent = fls.length
-    ? `${S.length} Logs · ${fmtDateDE(chron[0].date)} bis ${fmtDateDE(chron[chron.length-1].date)}`
+    ? `${S.length} Logs · ${fmtDateL(chron[0].date)} ${cfg.lang==="en"?"to":"bis"} ${fmtDateL(chron[chron.length-1].date)}`
     : "";
 
   // Kacheln (immer über alle Logs)
   const nBy = t => fls.filter(fl => flType(fl) === t).length;
   const tiles = [
-    ["Logs gesamt", `${S.length} <span style="font-size:12px;color:var(--muted)">✈️ ${nBy("flight")} · 🔧 ${nBy("ground")} · 🔌 ${nBy("panel")}</span>`],
-    ["Motorlaufzeit", fmtDur(total("runSecs"))],
-    ["Strecke gesamt", fmtDist(total("dist"))],
-    ["Überschreitungen", S.reduce((s,x) => s + x.nCrit, 0) + " rot / " + S.reduce((s,x) => s + x.nWarn, 0) + " gelb"],
-    ["Höchste Öltemp.", fmtNum(Math.max(...S.map(x => x.maxOilT ?? -999)), 1) + " °C"],
-    ["Höchste Drehzahl", fmtNum(Math.max(...S.map(x => x.maxRpm ?? 0)), 0) + " rpm"],
-    ["Größte Höhe", fmtNum(Math.max(...S.map(x => x.maxAlt ?? 0)), 0) + " ft"],
+    [T("Logs gesamt"), `${S.length} <span style="font-size:12px;color:var(--muted)">✈️ ${nBy("flight")} · 🔧 ${nBy("ground")} · 🔌 ${nBy("panel")}</span>`],
+    [T("Motorlaufzeit"), fmtDur(total("runSecs"))],
+    [T("Strecke gesamt"), fmtDist(total("dist"))],
+    [T("Überschreitungen"), S.reduce((s,x) => s + x.nCrit, 0) + (cfg.lang==="en"?" red / ":" rot / ") + S.reduce((s,x) => s + x.nWarn, 0) + (cfg.lang==="en"?" yellow":" gelb")],
+    [T("Höchste Öltemp."), fmtV("oilT", Math.max(...S.map(x => x.maxOilT ?? -999)), 1) + " " + unitOf("oilT")],
+    [T("Höchste Drehzahl"), nf(Math.max(...S.map(x => x.maxRpm ?? 0)), 0) + " rpm"],
+    [T("Größte Höhe"), fmtV("alt", Math.max(...S.map(x => x.maxAlt ?? 0)), 0) + " " + unitOf("alt")],
   ];
   $("#ovTiles").innerHTML = tiles.map(([n,v]) =>
     `<div class="tile"><div class="name">${n}</div><div class="val" style="font-size:18px">${v}</div></div>`).join("");
@@ -534,27 +799,27 @@ function renderOverview(){
   const chipDefs = [["all","Alle"],["flight","✈️ Flüge"],["ground","🔧 Standläufe"],["panel","🔌 Nur Avionik"]];
   $("#typeChips").innerHTML = chipDefs.map(([t,lbl]) => {
     const n = t === "all" ? S.length : nBy(t);
-    return `<span class="chip ${f.type === t ? "active" : ""}" data-t="${t}">${lbl} (${n})</span>`;
+    return `<span class="chip ${f.type === t ? "active" : ""}" data-t="${t}">${T(lbl)} (${n})</span>`;
   }).join("");
   document.querySelectorAll("#typeChips .chip").forEach(ch =>
     ch.addEventListener("click", () => { f.type = ch.dataset.t; state.shown = 300; renderOverview(); }));
 
   const months = [...new Set(S.map(x => x.date.slice(0,7)))].sort().reverse();
-  $("#monthSel").innerHTML = `<option value="all">Alle Monate</option>` +
+  $("#monthSel").innerHTML = `<option value="all">${T("Alle Monate")}</option>` +
     months.map(m => `<option value="${m}" ${f.month === m ? "selected" : ""}>${m.slice(5,7)}.${m.slice(0,4)}</option>`).join("");
   $("#monthSel").onchange = e => { f.month = e.target.value; state.shown = 300; renderOverview(); };
   const wo = $("#warnOnly");
   wo.checked = f.warnOnly;
   wo.onchange = () => { f.warnOnly = wo.checked; state.shown = 300; renderOverview(); };
   const sb = $("#sortBtn");
-  sb.textContent = state.sortAsc ? "↑ Älteste zuerst" : "↓ Neueste zuerst";
+  sb.textContent = state.sortAsc ? T("↑ Älteste zuerst") : T("↓ Neueste zuerst");
   sb.onclick = () => { state.sortAsc = !state.sortAsc; sortFlights(); renderOverview(); };
 
   // Zeitleiste (gefiltert, seitenweise)
   const list = filteredFlights();
   const ul = $("#flightList"); ul.innerHTML = "";
   $("#flCount").textContent = list.length === fls.length
-    ? `${fls.length} Logs` : `${list.length} von ${fls.length} Logs`;
+    ? `${fls.length} Logs` : `${list.length} ${cfg.lang==="en"?"of":"von"} ${fls.length} Logs`;
   const frag = document.createDocumentFragment();
   list.slice(0, state.shown).forEach(({ fl, idx }, li_i) => {
     const s = fl.summary;
@@ -562,26 +827,29 @@ function renderOverview(){
     const flightish = flType(fl) === "flight";
     const li = document.createElement("li");
     const badges = [];
-    if (s.nCrit) badges.push(`<span class="badge" title="rote Phasen"><span class="dot" style="background:var(--crit)"></span>${s.nCrit}</span>`);
-    if (s.nWarn) badges.push(`<span class="badge" title="gelbe Phasen"><span class="dot" style="background:var(--warn)"></span>${s.nWarn}</span>`);
-    if (!s.nCrit && !s.nWarn) badges.push(`<span class="badge" title="alles im grünen Bereich"><span class="dot" style="background:var(--good)"></span>OK</span>`);
+    if (s.nCrit) badges.push(`<span class="badge" title="${T("rote Phasen")}"><span class="dot" style="background:var(--crit)"></span>${s.nCrit}</span>`);
+    if (s.nWarn) badges.push(`<span class="badge" title="${T("gelbe Phasen")}"><span class="dot" style="background:var(--warn)"></span>${s.nWarn}</span>`);
+    if (!s.nCrit && !s.nWarn) badges.push(`<span class="badge" title="${T("alles im grünen Bereich")}"><span class="dot" style="background:var(--good)"></span>OK</span>`);
     const facts = flType(fl) === "panel"
-      ? `<span>nur Avionik, Motor lief nicht</span>`
-      : `<span><b>${fmtDur(s.runSecs)}</b> Motor</span>` +
-        (flightish ? `<span><b>${fmtDist(s.dist)}</b></span><span>max <b>${fmtNum(s.maxAlt,0)} ft</b></span>` : "") +
-        `<span>max <b>${fmtNum(s.maxRpm,0)} rpm</b></span><span>Öl <b>${fmtNum(s.maxOilT,1)} °C</b></span>`;
+      ? `<span>${T("nur Avionik, Motor lief nicht")}</span>`
+      : `<span><b>${fmtDur(s.runSecs)}</b> ${T("Motor")}</span>` +
+        (flightish ? `<span><b>${fmtDist(s.dist)}</b></span><span>max <b>${fmtV("alt",s.maxAlt,0)} ${unitOf("alt")}</b></span>` : "") +
+        `<span>max <b>${nf(s.maxRpm,0)} rpm</b></span><span>${cfg.lang==="en"?"Oil":"Öl"} <b>${fmtV("oilT",s.maxOilT,1)} ${unitOf("oilT")}</b></span>`;
     li.innerHTML = `
-      <span class="fl-type" title="${tm.label}">${tm.icon}</span>
-      <span class="fl-when"><span class="d">${esc(fmtDateDE(s.date))}</span> <span class="t">${esc(s.start.slice(0,5))}</span></span>
+      <span class="fl-type" title="${esc(typeLabel(flType(fl)))}">${tm.icon}</span>
+      <span class="fl-when"><span class="d">${esc(fmtDateL(s.date))}</span> <span class="t">${esc(s.start.slice(0,5))}</span></span>
       <span class="fl-facts">${facts}</span>
       <span class="fl-badges">${badges.join("")}</span>
-      <button class="fl-x" title="Diesen Log entfernen">✕</button>`;
+      <button class="fl-x" title="${T("Diesen Log entfernen")}">✕</button>`;
     li.addEventListener("click", () => showFlight(idx));
     li.querySelector(".fl-x").addEventListener("click", async e => {
       e.stopPropagation();
-      if (!confirm(`${tm.label} vom ${fmtDateDE(s.date)} ${s.start.slice(0,5)} entfernen?\n\nDie CSV-Datei wird dabei aus dem Ordner gelöscht.`)) return;
+      const msg = cfg.lang === "en"
+        ? `Remove ${typeLabel(flType(fl))} of ${fmtDateL(s.date)} ${s.start.slice(0,5)}?\n\nThe CSV file will be deleted from the folder.`
+        : `${typeLabel(flType(fl))} vom ${fmtDateL(s.date)} ${s.start.slice(0,5)} entfernen?\n\nDie CSV-Datei wird dabei aus dem Ordner gelöscht.`;
+      if (!confirm(msg)) return;
       try { await api(`/api/flights/${encodeURIComponent(fl.id)}`, { method:"DELETE" }); }
-      catch(err){ toast("Löschen fehlgeschlagen", err.message, "err", 8000); return; }
+      catch(err){ toast(T("Löschen fehlgeschlagen"), err.message, "err", 8000); return; }
       state.flights.splice(idx, 1);
       if (state.flights.length) renderOverview();
       else { $("#overview").style.display = "none"; $("#meta").textContent = ""; destroyMaps(); }
@@ -592,7 +860,9 @@ function renderOverview(){
   const mb = $("#moreBtn");
   if (list.length > state.shown){
     mb.style.display = "";
-    mb.textContent = `Weitere anzeigen (${list.length - state.shown} verbleibend)`;
+    mb.textContent = cfg.lang === "en"
+      ? `Show more (${list.length - state.shown} remaining)`
+      : `Weitere anzeigen (${list.length - state.shown} verbleibend)`;
     mb.onclick = () => { state.shown += 500; renderOverview(); };
   } else mb.style.display = "none";
 
@@ -605,7 +875,8 @@ function renderOverview(){
   if (withTrack.length && window.L){
     const drawn = withTrack.slice(0, MAP_CAP);
     $("#ovMapStats").textContent = drawn.length < withTrack.length
-      ? `${drawn.length} von ${withTrack.length} Tracks (Auswahl weiter einschränken für mehr Detail)`
+      ? (cfg.lang==="en" ? `${drawn.length} of ${withTrack.length} tracks (narrow the filter for more detail)`
+                         : `${drawn.length} von ${withTrack.length} Tracks (Auswahl weiter einschränken für mehr Detail)`)
       : `${drawn.length} Tracks`;
     pendingInits.push(() => {
       const map = L.map(mapEl);
@@ -616,7 +887,7 @@ function renderOverview(){
       drawn.forEach(({ fl, idx }, i) => {
         const s = fl.summary;
         const pl = L.polyline(s.trackLL, { color: TRACK_COLORS[i % TRACK_COLORS.length], weight: 3, opacity: .8 }).addTo(map);
-        pl.bindTooltip(`${flTM(fl).icon} ${esc(fmtDateDE(s.date))} ${esc(s.start.slice(0,5))} — ${fmtDist(s.dist)}`, { sticky:true });
+        pl.bindTooltip(`${flTM(fl).icon} ${esc(fmtDateL(s.date))} ${esc(s.start.slice(0,5))} — ${fmtDist(s.dist)}`, { sticky:true });
         pl.on("click", () => showFlight(idx));
         bounds.push(...s.trackLL);
       });
@@ -669,9 +940,10 @@ function renderDetail(flight){
   // Klassifizierung manuell übersteuerbar
   const ts = $("#typeSel");
   const autoTM = TYPE_META[s.type] || TYPE_META.panel;
-  ts.innerHTML = `<option value="auto">Auto: ${autoTM.icon} ${autoTM.label}</option>` +
-    Object.entries(TYPE_META).map(([k, v]) =>
-      `<option value="${k}">${v.icon} ${v.label} (manuell)</option>`).join("");
+  const manLbl = cfg.lang === "en" ? "manual" : "manuell";
+  ts.innerHTML = `<option value="auto">${T("Auto")}: ${autoTM.icon} ${typeLabel(s.type)}</option>` +
+    ["flight","ground","panel"].map(k =>
+      `<option value="${k}">${TYPE_META[k].icon} ${typeLabel(k)} (${manLbl})</option>`).join("");
   ts.value = flight.typeOverride || "auto";
   ts.onchange = async () => {
     flight.typeOverride = ts.value === "auto" ? null : ts.value;
@@ -693,24 +965,27 @@ function renderDetail(flight){
   }
   const fullBtn = $("#fullBtn");
   fullBtn.style.display = s.engStart != null ? "" : "none";
-  fullBtn.textContent = state.fullLog ? "✂ Nur Motorlaufzeit" : "◱ Ganzes Log";
+  fullBtn.textContent = state.fullLog
+    ? (cfg.lang==="en" ? "✂ Engine time only" : "✂ Nur Motorlaufzeit")
+    : (cfg.lang==="en" ? "◱ Full log" : "◱ Ganzes Log");
   fullBtn.title = state.fullLog
-    ? "Anzeige auf Motorstart bis Motorstopp (±1 min) begrenzen"
-    : "Auch die Zeit davor/danach anzeigen (nur Avionik)";
+    ? (cfg.lang==="en" ? "Limit view to engine start–stop (±1 min)" : "Anzeige auf Motorstart bis Motorstopp (±1 min) begrenzen")
+    : (cfg.lang==="en" ? "Also show time before/after (avionics only)" : "Auch die Zeit davor/danach anzeigen (nur Avionik)");
 
   // Umschalter
   const sel = $("#flightSel");
   sel.innerHTML = state.flights.map((fl, i) =>
-    `<option value="${i}" ${i === state.current ? "selected" : ""}>${flTM(fl).icon} ${esc(fmtDateDE(fl.summary.date))} · ${esc(fl.summary.start.slice(0,5))} (${fmtDur(fl.summary.dur)})</option>`).join("");
+    `<option value="${i}" ${i === state.current ? "selected" : ""}>${flTM(fl).icon} ${esc(fmtDateL(fl.summary.date))} · ${esc(fl.summary.start.slice(0,5))} (${fmtDur(fl.summary.dur)})</option>`).join("");
   $("#prevBtn").disabled = state.current <= 0;
   $("#nextBtn").disabled = state.current >= state.flights.length - 1;
 
   const t0 = rows[0], t1 = rows[rows.length-1];
+  const en = cfg.lang === "en";
   $("#meta").textContent =
-    `${info.aircraft_ident || "?"} · ${tm.icon} ${tm.label} · ${fmtDateDE(t0.date)} · ${t0.timeStr}–${t1.timeStr} Lokalzeit` +
-    (trimmed ? ` (auf Motorlaufzeit ±1 min zugeschnitten, Log gesamt ${fmtDur(s.dur)})` : ` (${fmtDur(t1.sec - t0.sec)})`) +
-    ` · Motorlaufzeit ca. ${fmtDur(s.runSecs)} · Strecke ${fmtDist(s.dist)}` +
-    (info.engine_hours ? ` · Motorstunden lt. G3X: ${info.engine_hours} h` : "");
+    `${info.aircraft_ident || "?"} · ${tm.icon} ${typeLabel(flType(flight))} · ${fmtDateL(t0.date)} · ${t0.timeStr}–${t1.timeStr} ${en?"local time":"Lokalzeit"}` +
+    (trimmed ? (en ? ` (trimmed to engine time ±1 min, full log ${fmtDur(s.dur)})` : ` (auf Motorlaufzeit ±1 min zugeschnitten, Log gesamt ${fmtDur(s.dur)})`) : ` (${fmtDur(t1.sec - t0.sec)})`) +
+    ` · ${en?"engine time ≈":"Motorlaufzeit ca."} ${fmtDur(s.runSecs)} · ${en?"distance":"Strecke"} ${fmtDist(s.dist)}` +
+    (info.engine_hours ? ` · ${en?"engine hours per G3X":"Motorstunden lt. G3X"}: ${info.engine_hours} h` : "");
 
   const allEps = allEpisodes(rows);
   const epWorst = {};
@@ -728,9 +1003,10 @@ function renderDetail(flight){
     const col = w === 2 ? "var(--crit)" : w === 1 ? "var(--warn)" : "var(--good)";
     const d = document.createElement("div");
     d.className = "tile";
-    d.innerHTML = `<div class="name"><span class="dot" style="background:${L.zones?col:"var(--axis)"}"></span>${L.label}</div>
-      <div class="val">${fmtNum(st.max, L.dec)}<span class="unit"> ${L.unit} max</span></div>
-      <div class="mm">Ø ${fmtNum(st.avg, L.dec)} · min ${fmtNum(st.min, L.dec)}</div>`;
+    const u = unitOf(k, L.unit), avgL = cfg.lang==="en"?"avg":"Ø";
+    d.innerHTML = `<div class="name"><span class="dot" style="background:${L.zones?col:"var(--axis)"}"></span>${labelOf(k)}</div>
+      <div class="val">${fmtV(k, st.max, L.dec)}<span class="unit"> ${u} max</span></div>
+      <div class="mm">${avgL} ${fmtV(k, st.avg, L.dec)} · min ${fmtV(k, st.min, L.dec)}</div>`;
     tiles.appendChild(d);
   }
   const egtMax = Math.max(...["egt1","egt2","egt3","egt4"].map(k => stats(rows,k)?.max ?? -1));
@@ -739,31 +1015,33 @@ function renderDetail(flight){
     const col = w === 2 ? "var(--crit)" : w === 1 ? "var(--warn)" : "var(--good)";
     const d = document.createElement("div");
     d.className = "tile";
-    d.innerHTML = `<div class="name"><span class="dot" style="background:${col}"></span>EGT (heißester Zyl.)</div>
-      <div class="val">${fmtNum(egtMax,0)}<span class="unit"> °C max</span></div>
-      <div class="mm">Limit 950 °C</div>`;
+    const u = unitOf("egt","°C");
+    d.innerHTML = `<div class="name"><span class="dot" style="background:${col}"></span>${cfg.lang==="en"?"EGT (hottest cyl.)":"EGT (heißester Zyl.)"}</div>
+      <div class="val">${fmtV("egt",egtMax,0)}<span class="unit"> ${u} max</span></div>
+      <div class="mm">${cfg.lang==="en"?"limit":"Limit"} ${fmtV("egt",950,0)} ${u}</div>`;
     tiles.appendChild(d);
   }
 
   // Warnliste
   const wl = $("#warnings");
   if (!allEps.length){
-    wl.innerHTML = `<div class="allok"><span class="badge"><span class="dot" style="background:var(--good)"></span>Alle Werte im grünen Bereich</span> — keine Phase ≥ 3 s außerhalb der Normalbereiche (bei laufendem Motor).</div>`;
+    wl.innerHTML = `<div class="allok"><span class="badge"><span class="dot" style="background:var(--good)"></span>${T("Alle Werte im grünen Bereich")}</span> — ${en?"no phase ≥ 3 s outside the normal ranges (engine running).":"keine Phase ≥ 3 s außerhalb der Normalbereiche (bei laufendem Motor)."}</div>`;
   } else {
     const ul = document.createElement("ul"); ul.className = "warnlist";
     for (const ep of allEps){
+      const key = /^egt[1-4]$/.test(ep.key) ? "egt" : ep.key;
       const L = LIMITS[ep.key] || LIMITS.egt;
       const li = document.createElement("li");
       li.innerHTML = `<span class="t">${ep.startStr}–${ep.endStr.slice(0,8)}</span>
         <span class="ic">${STATUS_ICON[ep.sev]}</span>
-        <span><b>${L.label}</b> ${ep.sev === "crit" ? "über Limit" : "im Vorwarnbereich"} für ${fmtDur(ep.end-ep.start+1)} — Spitze ${fmtNum(ep.peak, L.dec)} ${L.unit}</span>`;
+        <span><b>${esc(labelOf(ep.key))}</b> ${ep.sev === "crit" ? T("über Limit") : T("im Vorwarnbereich")} ${en?"for":"für"} ${fmtDur(ep.end-ep.start+1)} — ${en?"peak":"Spitze"} ${fmtV(key, ep.peak, L.dec)} ${unitOf(key, L.unit)}</span>`;
       ul.appendChild(li);
     }
     wl.innerHTML = ""; wl.appendChild(ul);
     const over5 = allEps.filter(e => e.key === "rpm" && e.end - e.start + 1 > 300);
     if (over5.length){
       const div = document.createElement("div");
-      div.innerHTML = `<span class="badge" style="margin-top:10px"><span class="dot" style="background:var(--crit)"></span>Achtung: Drehzahl über 5500 rpm länger als 5 Minuten — laut OM nur max. 5 min zulässig.</span>`;
+      div.innerHTML = `<span class="badge" style="margin-top:10px"><span class="dot" style="background:var(--crit)"></span>${en?"Caution: RPM above 5500 for more than 5 minutes — per OM only 5 min allowed.":"Achtung: Drehzahl über 5500 rpm länger als 5 Minuten — laut OM nur max. 5 min zulässig."}</span>`;
       wl.appendChild(div);
     }
   }
@@ -778,12 +1056,12 @@ function renderDetail(flight){
       const m = casMap.get(msg); m.last = r.timeStr; m.n++;
     }
   }
-  if (!casMap.size) casDiv.innerHTML = `<div class="allok">Keine CAS-Meldungen im Log.</div>`;
+  if (!casMap.size) casDiv.innerHTML = `<div class="allok">${T("Keine CAS-Meldungen im Log.")}</div>`;
   else {
     const ul = document.createElement("ul"); ul.className = "warnlist";
     for (const [msg,m] of casMap){
       const li = document.createElement("li");
-      li.innerHTML = `<span class="t">${m.first}–${m.last}</span><span class="ic">ℹ️</span><span><b>${esc(msg)}</b> (${fmtDur(m.n)} aktiv)</span>`;
+      li.innerHTML = `<span class="t">${m.first}–${m.last}</span><span class="ic">ℹ️</span><span><b>${esc(msg)}</b> (${fmtDur(m.n)} ${en?"active":"aktiv"})</span>`;
       ul.appendChild(li);
     }
     casDiv.innerHTML = ""; casDiv.appendChild(ul);
@@ -797,7 +1075,7 @@ function renderDetail(flight){
     const det = document.createElement("details");
     det.className = "section"; det.open = open !== false;
     const sum = document.createElement("summary");
-    sum.innerHTML = name + ' <span class="count"></span>';
+    sum.innerHTML = esc(T(name)) + ' <span class="count"></span>';
     det.appendChild(sum);
     const content = document.createElement("div");
     det.appendChild(content);
@@ -809,7 +1087,7 @@ function renderDetail(flight){
   const addChart = (secName, card) => { section(secName).appendChild(card); bump(secName); };
 
   const mkEng = (title, series, key, opts) =>
-    addChart("Motor", chartCard(rows, title, series, LIMITS[key], opts || {}));
+    addChart("Motor", chartCard(rows, title, series, LIMITS[key], Object.assign({ key }, opts || {})));
   section("Motor", true);
   mkEng("Drehzahl", [{key:"rpm", label:"RPM", color:"var(--s1)"}], "rpm");
   mkEng("Ladedruck (MAP)", [{key:"map", label:"MAP", color:"var(--s1)"}], "map");
@@ -842,12 +1120,12 @@ function renderDetail(flight){
     addChart("Flugweg & GPS", chartCard(rows, "Höhe", [
       {key:"alt", label:"Baro-Höhe", color:"var(--s1)"},
       {key:"gpsAlt", label:"GPS-Höhe", color:"var(--s5)"},
-    ], LIMITS.alt, {}));
+    ], LIMITS.alt, { key:"alt" }));
   if (stats(rows, "gndSpd") || stats(rows, "ias"))
     addChart("Flugweg & GPS", chartCard(rows, "Geschwindigkeit", [
       {key:"gndSpd", label:"Groundspeed (GPS)", color:"var(--s1)"},
       {key:"ias", label:"IAS", color:"var(--s6)"},
-    ], LIMITS.gndSpd, {}));
+    ], LIMITS.gndSpd, { key:"gndSpd" }));
 
   // Kuratierte Gruppen
   const colByName = {};
@@ -874,7 +1152,7 @@ function renderDetail(flight){
     const span = Math.abs(col.max - col.min);
     const dec = span >= 100 ? 0 : span >= 3 ? 1 : 2;
     const unitM = col.name.match(/\(([^)]+)\)\s*$/);
-    const L = { label: col.name, unit: unitM ? unitM[1] : "", dec, zones:null, note:"CSV-Spalte: " + col.name };
+    const L = { label: col.name, unit: unitM ? unitM[1] : "", dec, zones:null, note:(en?"CSV column: ":"CSV-Spalte: ") + col.name };
     addChart("Weitere Messwerte", chartCard(rows, col.name.replace(/\s*\([^)]*\)\s*$/, ""), [
       { key: col.key, label: col.name, color:"var(--s1)" }], L, {}));
   }
@@ -885,17 +1163,17 @@ function renderDetail(flight){
     const cont = section("Status & Ereignisse", false);
     const card = document.createElement("div");
     card.className = "card";
-    card.innerHTML = `<h2>Zustandsänderungen</h2>
-      <div class="zonenote" style="margin:0 0 10px">Für Textspalten (Modi, Statuswerte) wird jede Änderung mit Uhrzeit gelistet — ein Liniendiagramm ergibt hier keinen Sinn.</div>`;
+    card.innerHTML = `<h2>${T("Zustandsänderungen")}</h2>
+      <div class="zonenote" style="margin:0 0 10px">${T("Für Textspalten (Modi, Statuswerte) wird jede Änderung mit Uhrzeit gelistet — ein Liniendiagramm ergibt hier keinen Sinn.")}</div>`;
     const grid = document.createElement("div"); grid.className = "statgrid";
     for (const c of catsWithData){
       const box = document.createElement("div"); box.className = "statcol";
       const evs = c.events.filter(e => e.val !== "" || c.events.indexOf(e) > 0);
-      let html = `<h3>${esc(c.label)} <span style="color:var(--muted);font-weight:400">(${evs.length} Änderungen)</span></h3><ul>`;
+      let html = `<h3>${esc(c.label)} <span style="color:var(--muted);font-weight:400">(${evs.length} ${en?"changes":"Änderungen"})</span></h3><ul>`;
       const MAXE = 30;
       for (const e of evs.slice(0, MAXE))
-        html += `<li><span class="t">${e.timeStr}</span><span>${e.val === "" ? "<i>leer</i>" : esc(e.val)}</span></li>`;
-      if (evs.length > MAXE) html += `<li class="more">… ${evs.length - MAXE} weitere Änderungen</li>`;
+        html += `<li><span class="t">${e.timeStr}</span><span>${e.val === "" ? `<i>${en?"empty":"leer"}</i>` : esc(e.val)}</span></li>`;
+      if (evs.length > MAXE) html += `<li class="more">… ${evs.length - MAXE} ${en?"more changes":"weitere Änderungen"}</li>`;
       html += "</ul>";
       box.innerHTML = html;
       grid.appendChild(box);
@@ -906,18 +1184,20 @@ function renderDetail(flight){
 
   // Referenztabelle
   const tb = $("#limitsTable");
-  tb.innerHTML = `<thead><tr><th>Parameter</th><th>Grün (normal)</th><th>Gelb (Vorsicht)</th><th>Rot (Limit)</th><th>Anmerkung</th></tr></thead>`;
+  tb.innerHTML = `<thead><tr><th>${T("Parameter")}</th><th>${T("Grün (normal)")}</th><th>${T("Gelb (Vorsicht)")}</th><th>${T("Rot (Limit)")}</th><th>${T("Anmerkung")}</th></tr></thead>`;
   const body = document.createElement("tbody");
+  const andWord = en ? " and " : " und ";
   for (const k of ["rpm","map","oilT","coolT","manT","oilP","fuelP","egt","egtSplit","volts","oat"]){
     const L = LIMITS[k];
     if (!L.zones) continue;
-    const f = v => Math.abs(v) >= 1e8 ? "" : fmtNum(v, L.dec);
+    const dc2 = decOf(k, L.dec);
+    const f = v => Math.abs(v) >= 1e8 ? "" : nf(convV(k, v), dc2);
     const seg = z2 => L.zones.filter(z => z[2] === z2).map(z =>
-        (z[0] <= -999 ? "≤ " + f(z[1]) : Math.abs(z[1]) >= 1e8 ? "≥ " + f(z[0]) : f(z[0]) + " – " + f(z[1]))).join(" und ");
+        (z[0] <= -999 ? "≤ " + f(z[1]) : Math.abs(z[1]) >= 1e8 ? "≥ " + f(z[0]) : f(z[0]) + " – " + f(z[1]))).join(andWord);
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td><b>${L.label}</b> <span style="color:var(--muted)">(${L.unit})</span></td>
+    tr.innerHTML = `<td><b>${esc(labelOf(k))}</b> <span style="color:var(--muted)">(${esc(unitOf(k, L.unit))})</span></td>
       <td class="c">${seg("good") || "–"}</td><td class="c">${[seg("cold"),seg("warn")].filter(Boolean).join(" / ") || "–"}</td>
-      <td class="c">${seg("crit") || "–"}</td><td>${L.note}</td>`;
+      <td class="c">${seg("crit") || "–"}</td><td>${esc(noteOf(k))}</td>`;
     body.appendChild(tr);
   }
   tb.appendChild(body);
@@ -927,8 +1207,10 @@ function renderDetail(flight){
   const emptyCat = catCols.filter(c => c.n === 0).map(c => CAT_COLS[c.name] || c.name);
   let eh = "";
   if (emptyNum.length || emptyCat.length)
-    eh += `<div><b>Im Log leer</b> (Sensor nicht verbaut oder Funktion nicht aktiv): ${[...emptyNum, ...emptyCat].map(n => `<code>${esc(n)}</code>`).join(" ")}</div>`;
-  eh += `<div style="margin-top:6px"><b>Bewusst ausgelassen:</b> <code>UTC Time</code> <code>UTC Offset</code> (redundant zur Lokalzeit), <code>GPS Time of Week</code> (interner Zähler), <code>Latitude</code>/<code>Longitude</code> (in der Flugweg-Karte enthalten), <code>Date</code>/<code>Time</code> (Zeitachse aller Diagramme).</div>`;
+    eh += `<div><b>${T("Im Log leer")}</b> ${en?"(sensor not installed or function inactive)":"(Sensor nicht verbaut oder Funktion nicht aktiv)"}: ${[...emptyNum, ...emptyCat].map(n => `<code>${esc(n)}</code>`).join(" ")}</div>`;
+  eh += en
+    ? `<div style="margin-top:6px"><b>Deliberately omitted:</b> <code>UTC Time</code> <code>UTC Offset</code> (redundant with local time), <code>GPS Time of Week</code> (internal counter), <code>Latitude</code>/<code>Longitude</code> (shown on the track map), <code>Date</code>/<code>Time</code> (time axis of all charts).</div>`
+    : `<div style="margin-top:6px"><b>Bewusst ausgelassen:</b> <code>UTC Time</code> <code>UTC Offset</code> (redundant zur Lokalzeit), <code>GPS Time of Week</code> (interner Zähler), <code>Latitude</code>/<code>Longitude</code> (in der Flugweg-Karte enthalten), <code>Date</code>/<code>Time</code> (Zeitachse aller Diagramme).</div>`;
   $("#emptyCols").innerHTML = eh;
 
   runPendingInits();
@@ -947,11 +1229,18 @@ function chartCard(rows, title, series, L, opts){
   const card = document.createElement("div");
   card.className = "card";
 
+  // Einheiten-Umrechnung anhand des Parameters
+  const dimKey = opts.key || (series[0] && series[0].key);
+  const cv = v => (v == null ? v : convV(dimKey, v));
+  const uu = unitOf(dimKey, L.unit);
+  const dc = decOf(dimKey, L.dec);
+
   const st0 = stats(rows, series[0].key, L) || stats(rows, (series[1]||{}).key, L);
   const head = document.createElement("div");
   head.className = "chart-head";
-  head.innerHTML = `<h2>${esc(title)}</h2>` + (st0 ?
-    `<span class="stats">max ${fmtNum(st0.max,L.dec)} · Ø ${fmtNum(st0.avg,L.dec)} · min ${fmtNum(st0.min,L.dec)} ${esc(L.unit)}</span>` : "");
+  const avgL = cfg.lang === "en" ? "avg" : "Ø";
+  head.innerHTML = `<h2>${esc(T(title))}</h2>` + (st0 ?
+    `<span class="stats">max ${nf(cv(st0.max),dc)} · ${avgL} ${nf(cv(st0.avg),dc)} · min ${nf(cv(st0.min),dc)} ${esc(uu)}</span>` : "");
   card.appendChild(head);
 
   const W = 1100, H = 260, padL = 52, padR = 14, padT = 10, padB = 26;
@@ -960,21 +1249,23 @@ function chartCard(rows, title, series, L, opts){
 
   let lo = Infinity, hi = -Infinity;
   for (const sr of series) for (const r of rows){
-    const v = r[sr.key]; if (v == null) continue;
+    const v = cv(r[sr.key]); if (v == null) continue;
     if (v < lo) lo = v; if (v > hi) hi = v;
   }
-  if (!isFinite(lo)){ card.appendChild(Object.assign(document.createElement("div"),{className:"allok",textContent:"Keine Daten in diesem Log."})); return card; }
-  if (L.zones) for (const [a,b] of L.zones){
-    if (a > -1e8 && a < hi + (hi-lo) * .6 && a > lo - (hi-lo)*.6) { lo = Math.min(lo,a); hi = Math.max(hi,a); }
+  if (!isFinite(lo)){ card.appendChild(Object.assign(document.createElement("div"),{className:"allok",textContent:T("Keine Daten in diesem Log.")})); return card; }
+  if (L.zones) for (const [a0,b0] of L.zones){
+    const a = cv(a0);
+    if (a0 > -1e8 && a < hi + (hi-lo) * .6 && a > lo - (hi-lo)*.6) { lo = Math.min(lo,a); hi = Math.max(hi,a); }
   }
-  const span = Math.max(hi - lo, L.dec ? 1 : 10);
+  const span = Math.max(hi - lo, dc ? 1 : 10);
   lo -= span * .06; hi += span * .10;
 
   const Y = v => padT + (hi - v) / (hi - lo) * (H - padT - padB);
   const svg = document.createElementNS(svgNS, "svg");
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
 
-  if (L.zones) for (const [a,b,z] of L.zones){
+  if (L.zones) for (const [a0,b0,z] of L.zones){
+    const a = cv(a0), b = cv(b0);
     const ya = Y(Math.max(lo, a)), yb = Y(Math.min(hi, b));
     if (ya - yb > 0.5 && Math.max(lo,a) < hi && Math.min(hi,b) > lo){
       const rc = document.createElementNS(svgNS,"rect");
@@ -991,7 +1282,7 @@ function chartCard(rows, title, series, L, opts){
     const tx = document.createElementNS(svgNS,"text");
     tx.setAttribute("x",padL-8); tx.setAttribute("y",y+4); tx.setAttribute("text-anchor","end");
     tx.setAttribute("font-size","11"); tx.setAttribute("fill","var(--muted)");
-    tx.textContent = fmtNum(tv, tv % 1 ? L.dec : 0); svg.appendChild(tx);
+    tx.textContent = nf(tv, tv % 1 ? dc : 0); svg.appendChild(tx);
   }
   const xTickEvery = niceTimeStep(t1 - t0);
   for (let sx = Math.ceil(t0/xTickEvery)*xTickEvery; sx <= t1; sx += xTickEvery){
@@ -1027,7 +1318,7 @@ function chartCard(rows, title, series, L, opts){
         bStart += bucketW * Math.max(1, Math.floor((r.sec - bStart)/bucketW));
         bMin = bMax = bFirst = bLast = null;
       }
-      const v = r[sr.key];
+      const v = cv(r[sr.key]);
       if (v == null){ if (bFirst != null){ emit(); bMin=bMax=bFirst=bLast=null; } pen = false; continue; }
       if (bFirst == null) bFirst = v;
       bLast = v;
@@ -1068,7 +1359,7 @@ function chartCard(rows, title, series, L, opts){
     let html = `<div class="tt">${r.timeStr}</div>`;
     for (const sr of series){
       const v = r[sr.key];
-      html += `<div class="row"><span><i style="background:${sr.color}"></i>${esc(sr.label)}</span><b>${fmtNum(v, L.dec)} ${esc(L.unit)}</b></div>`;
+      html += `<div class="row"><span><i style="background:${sr.color}"></i>${esc(T(sr.label))}</span><b>${nf(cv(v), dc)} ${esc(uu)}</b></div>`;
     }
     tip.innerHTML = html;
     tip.style.display = "block";
@@ -1082,13 +1373,15 @@ function chartCard(rows, title, series, L, opts){
   if (series.length > 1){
     const lg = document.createElement("div");
     lg.className = "legend";
-    lg.innerHTML = series.map(sr => `<span><i style="background:${sr.color}"></i>${esc(sr.label)}</span>`).join("");
+    lg.innerHTML = series.map(sr => `<span><i style="background:${sr.color}"></i>${esc(T(sr.label))}</span>`).join("");
     card.appendChild(lg);
   }
-  if (opts.zoneNote || L.note){
+  const noteText = opts.key ? noteOf(opts.key) : (T(L.note || ""));
+  const zn = opts.zoneNote ? T(opts.zoneNote) : "";
+  if (zn || noteText){
     const note = document.createElement("div");
     note.className = "zonenote";
-    note.textContent = (opts.zoneNote ? opts.zoneNote + " — " : "") + (L.note || "");
+    note.textContent = (zn ? zn + " — " : "") + noteText;
     card.appendChild(note);
   }
   return card;
@@ -1096,16 +1389,16 @@ function chartCard(rows, title, series, L, opts){
 
 /* ---- Flugweg: OpenStreetMap (Leaflet), Fallback SVG. Hover = Werte dieser Sekunde ---- */
 const TIPROWS = [
-  ["gpsAlt","GPS-Höhe","ft",0], ["alt","Baro-Höhe","ft",0],
-  ["gndSpd","Groundspeed","kt",0], ["ias","IAS","kt",0],
-  ["rpm","Drehzahl","rpm",0], ["ff","Verbrauch","l/h",1],
-  ["oilT","Öltemp.","°C",1], ["coolT","Kühlmittel","°C",1],
+  ["gpsAlt","GPS-Höhe",0,""], ["alt","Baro-Höhe",0,""],
+  ["gndSpd","Groundspeed",0,""], ["ias","IAS",0,""],
+  ["rpm","Drehzahl",0,"rpm"], ["ff","Verbrauch",1,""],
+  ["oilT","Öltemp.",1,""], ["coolT","Kühlmittel",1,""],
 ];
 function tipHtml(r){
   let html = `<div class="tt">${r.timeStr}</div>`;
-  for (const [k, lbl, unit, dec] of TIPROWS){
+  for (const [k, lbl, base, fb] of TIPROWS){
     if (r[k] == null) continue;
-    html += `<div class="row"><span>${lbl}</span><b>${fmtNum(r[k], dec)} ${unit}</b></div>`;
+    html += `<div class="row"><span>${esc(T(lbl))}</span><b>${nf(convV(k, r[k]), decOf(k, base))} ${esc(unitOf(k, fb))}</b></div>`;
   }
   return html;
 }
@@ -1119,16 +1412,17 @@ function trackCard(rows){
 
 function leafletTrackCard(track){
   const { pts, dist } = track;
+  const en = cfg.lang === "en";
   const card = document.createElement("div");
   card.className = "card"; card.id = "track";
-  card.innerHTML = `<div class="chart-head"><h2>Flugweg (GPS)</h2>
-    <span class="stats">Strecke ${fmtDist(dist)}${dist < 1852 ? " (Rollen/Stand)" : ""} · ${pts.length.toLocaleString("de-AT")} GPS-Punkte · Maus über den Weg = Werte in dieser Sekunde</span></div>`;
+  card.innerHTML = `<div class="chart-head"><h2>${T("Flugweg (GPS)")}</h2>
+    <span class="stats">${en?"Distance":"Strecke"} ${fmtDist(dist)}${dist < 1852 ? (en?" (taxi/stationary)":" (Rollen/Stand)") : ""} · ${pts.length.toLocaleString(en?"en-US":"de-AT")} ${en?"GPS points":"GPS-Punkte"} · ${en?"hover the path = values at that second":"Maus über den Weg = Werte in dieser Sekunde"}</span></div>`;
   const mapEl = document.createElement("div");
   mapEl.className = "mapbox";
   card.appendChild(mapEl);
   const note = document.createElement("div");
   note.className = "zonenote";
-  note.textContent = "Kartendaten © OpenStreetMap-Mitwirkende (Kacheln werden aus dem Internet geladen).";
+  note.textContent = T("Kartendaten © OpenStreetMap-Mitwirkende (Kacheln werden aus dem Internet geladen).");
   card.appendChild(note);
 
   const tip = document.createElement("div");
@@ -1149,9 +1443,9 @@ function leafletTrackCard(track){
 
     L.polyline(ll, { color:"#2a78d6", weight: 3.5, opacity: .9 }).addTo(map);
     L.circleMarker(ll[0], { radius:7, color:"#fff", weight:2, fillColor:"#0ca30c", fillOpacity:1 })
-      .addTo(map).bindTooltip("Start " + pts[0].timeStr);
+      .addTo(map).bindTooltip(T("Start") + " " + pts[0].timeStr);
     L.circleMarker(ll[ll.length-1], { radius:7, color:"#fff", weight:2, fillColor:"#d03b3b", fillOpacity:1 })
-      .addTo(map).bindTooltip("Ende " + pts[pts.length-1].timeStr);
+      .addTo(map).bindTooltip(T("Ende") + " " + pts[pts.length-1].timeStr);
     map.fitBounds(L.latLngBounds(ll).pad(0.12));
 
     const hov = L.circleMarker(ll[0], { radius:7.5, color:"#fff", weight:2, fillColor:"#eb6834", fillOpacity:1, opacity:0, interactive:false });
@@ -1205,10 +1499,11 @@ function svgTrackCard(track){
   const X = x => pad + (x - x0) * scale + (W - 2*pad - spanX*scale) / 2;
   const Y = y => H - pad - (y - y0) * scale - (H - 2*pad - spanY*scale) / 2;
 
+  const en = cfg.lang === "en";
   const card = document.createElement("div");
   card.className = "card"; card.id = "track";
-  card.innerHTML = `<div class="chart-head"><h2>Flugweg (GPS)</h2>
-    <span class="stats">Strecke ${fmtDist(dist)} · ${pts.length.toLocaleString("de-AT")} GPS-Punkte · Karte offline — Umriss-Darstellung</span></div>`;
+  card.innerHTML = `<div class="chart-head"><h2>${T("Flugweg (GPS)")}</h2>
+    <span class="stats">${en?"Distance":"Strecke"} ${fmtDist(dist)} · ${pts.length.toLocaleString(en?"en-US":"de-AT")} ${en?"GPS points":"GPS-Punkte"} · ${en?"map offline — outline view":"Karte offline — Umriss-Darstellung"}</span></div>`;
   const box = document.createElement("div");
   box.className = "chartbox";
   const svg = document.createElementNS(svgNS, "svg");
@@ -1238,8 +1533,8 @@ function svgTrackCard(track){
     t.setAttribute("font-weight", "600"); t.setAttribute("fill", "var(--ink2)");
     t.textContent = label; svg.appendChild(t);
   };
-  marker(X(xs[0]), Y(ys[0]), "var(--good)", "Start", "start");
-  marker(X(xs[xs.length-1]), Y(ys[ys.length-1]), "var(--crit)", "Ende", "end");
+  marker(X(xs[0]), Y(ys[0]), "var(--good)", T("Start"), "start");
+  marker(X(xs[xs.length-1]), Y(ys[ys.length-1]), "var(--crit)", T("Ende"), "end");
 
   const hov = document.createElementNS(svgNS, "circle");
   hov.setAttribute("r", 6.5); hov.setAttribute("fill", "var(--s6)");

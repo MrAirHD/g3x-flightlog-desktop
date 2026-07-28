@@ -6,6 +6,7 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const { pathToFileURL } = require("node:url");
 const { load, save } = require("./settings.cjs");
+const { migrateFolder } = require("./migrate.cjs");
 
 // Index-Datei je CSV-Ordner in den App-Daten (der Ordner selbst bleibt sauber).
 function indexFileFor(dataDir) {
@@ -42,6 +43,7 @@ async function startBackend(dataDir) {
     const mod = await import(pathToFileURL(path.join(__dirname, "..", "backend", "server.mjs")).href);
     createBackend = mod.createBackend;
   }
+  try { migrateFolder(dataDir); } catch (e) { console.error("Migration:", e.message); }  // Alt-Unterordner auflösen
   return createBackend({ dataDir, stateFile: indexFileFor(dataDir) });
 }
 
@@ -81,9 +83,9 @@ function buildMenu() {
       label: t.language,
       submenu: [
         { label: "English", type: "radio", checked: settings.language === "en",
-          click: () => { settings.language = "en"; save(settings); buildMenu(); } },
+          click: () => { settings.language = "en"; save(settings); buildMenu(); if (win) win.webContents.reload(); } },
         { label: "Deutsch", type: "radio", checked: settings.language === "de",
-          click: () => { settings.language = "de"; save(settings); buildMenu(); } },
+          click: () => { settings.language = "de"; save(settings); buildMenu(); if (win) win.webContents.reload(); } },
       ],
     },
     {
@@ -109,12 +111,23 @@ function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-// ---- IPC für die Statusleiste im Frontend ----
+// ---- IPC für das Frontend ----
 ipcMain.handle("desktop:getInfo", () => ({
-  dataDir: settings.dataDir, language: settings.language, version: app.getVersion(),
+  dataDir: settings.dataDir, language: settings.language, units: settings.units, version: app.getVersion(),
 }));
 ipcMain.handle("desktop:chooseFolder", async () => { await chooseFolder(); return settings.dataDir; });
 ipcMain.handle("desktop:openFolder", () => shell.openPath(settings.dataDir));
+// Sprache/Einheiten aus dem Frontend speichern; Menü neu bauen, Seite neu laden.
+ipcMain.handle("desktop:setSettings", (_e, patch) => {
+  if (patch && typeof patch === "object") {
+    if (patch.language) settings.language = patch.language;
+    if (patch.units) settings.units = { ...settings.units, ...patch.units };
+    save(settings);
+    buildMenu();
+    if (win) win.webContents.reload();
+  }
+  return { language: settings.language, units: settings.units };
+});
 
 async function createWindow() {
   win = new BrowserWindow({
