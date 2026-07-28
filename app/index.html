@@ -271,7 +271,7 @@ button.btn.primary:hover{color:#fff;filter:brightness(1.05)}
     <div class="card" id="ovMapCard">
       <div class="chart-head"><h2>Alle Flüge</h2><span class="stats" id="ovMapStats"></span></div>
       <div class="mapbox small" id="ovMap"></div>
-      <div class="zonenote">Klick auf einen Track öffnet den Flug. Kartendaten © OpenStreetMap-Mitwirkende.</div>
+      <div class="zonenote" id="ovMapNote">Klick auf einen Track öffnet den Flug. Kartendaten © OpenStreetMap-Mitwirkende.</div>
     </div>
     <div class="card">
       <div class="chart-head"><h2>Zeitleiste</h2><span class="stats" id="flCount"></span></div>
@@ -319,7 +319,7 @@ button.btn.primary:hover{color:#fff;filter:brightness(1.05)}
     <div class="card">
       <h2>Referenzwerte Rotax 915 iS</h2>
       <div style="overflow-x:auto"><table class="limits" id="limitsTable"></table></div>
-      <div class="src">Quelle: BRP-Rotax <a href="https://sportflyingusa.com/wp-content/uploads/2021/02/OM_915-OPS-MANUAL-2021_R2-1.pdf">Operators Manual OM-915 i A Series</a>, Kap. 2.1 (Ed. 2020, Rev. 2). Mit „abgeleitet“ markierte Zwischenstufen sind keine offiziellen Rotax-Limits, sondern Vorwarnbereiche dieser Auswertung. Maßgeblich sind immer das aktuelle Operators Manual und das Flughandbuch.</div>
+      <div class="src" id="refSrc">Quelle: BRP-Rotax <a href="https://sportflyingusa.com/wp-content/uploads/2021/02/OM_915-OPS-MANUAL-2021_R2-1.pdf">Operators Manual OM-915 i A Series</a>, Kap. 2.1 (Ed. 2020, Rev. 2). Mit „abgeleitet“ markierte Zwischenstufen sind keine offiziellen Rotax-Limits, sondern Vorwarnbereiche dieser Auswertung. Maßgeblich sind immer das aktuelle Operators Manual und das Flughandbuch.</div>
     </div>
     <div class="card">
       <h2>Nicht dargestellte Spalten</h2>
@@ -670,6 +670,10 @@ function applyStaticI18n(){
   const back = $("#backBtn"); if (back) back.textContent = T("← Übersicht");
   const pr = document.querySelector('#report .toolbar button[onclick]'); if (pr) pr.textContent = T("🖨 Als PDF drucken");
   document.querySelectorAll("#overview h2, #report h2").forEach(h => { const k = h.textContent.trim(); if (DICT[k]) h.textContent = T(k); });
+  const ovn = $("#ovMapNote"); if (ovn) ovn.textContent = T("Klick auf einen Track öffnet den Flug. Kartendaten © OpenStreetMap-Mitwirkende.");
+  const rs = $("#refSrc"); if (rs) rs.innerHTML = cfg.lang === "en"
+    ? `Source: BRP-Rotax <a href="https://sportflyingusa.com/wp-content/uploads/2021/02/OM_915-OPS-MANUAL-2021_R2-1.pdf">Operator's Manual OM-915 i A Series</a>, ch. 2.1 (Ed. 2020, Rev. 2). Intermediate steps marked “derived” are not official Rotax limits but caution zones of this analysis. The current Operator's Manual and the aircraft flight manual always take precedence.`
+    : `Quelle: BRP-Rotax <a href="https://sportflyingusa.com/wp-content/uploads/2021/02/OM_915-OPS-MANUAL-2021_R2-1.pdf">Operators Manual OM-915 i A Series</a>, Kap. 2.1 (Ed. 2020, Rev. 2). Mit „abgeleitet“ markierte Zwischenstufen sind keine offiziellen Rotax-Limits, sondern Vorwarnbereiche dieser Auswertung. Maßgeblich sind immer das aktuelle Operators Manual und das Flughandbuch.`;
   $("#setTitle").textContent = T("Einstellungen");
   $("#setLangLbl").textContent = T("Sprache");
   $("#setTempLbl").textContent = T("Temperatur"); $("#setPressLbl").textContent = T("Druck");
