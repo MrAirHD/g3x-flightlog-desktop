@@ -120,6 +120,7 @@ async function createWindow() {
   win = new BrowserWindow({
     width: 1280, height: 900, minWidth: 900, minHeight: 600,
     backgroundColor: "#0d0d0d",
+    icon: path.join(__dirname, "..", "build", "icon.ico"),
     webPreferences: { preload: path.join(__dirname, "preload.cjs"), contextIsolation: true, nodeIntegration: false },
   });
   await win.loadURL(backend.url);
