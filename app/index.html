@@ -158,6 +158,15 @@ button.btn.primary:hover{color:#fff;filter:brightness(1.05)}
   font-size:12px;max-width:60ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #desktopBar .btn{padding:5px 12px}
 #desktopBar .spacer{flex:1}
+#tutorial{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:2800}
+.tut-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:30px 32px;width:min(460px,94vw);text-align:center;box-shadow:0 12px 48px rgba(0,0,0,.35)}
+.tut-emoji{font-size:44px;line-height:1;margin-bottom:6px}
+.tut-card h2{margin:6px 0 10px;font-size:20px}
+.tut-card p{margin:0;color:var(--ink2);font-size:14.5px;line-height:1.55;min-height:66px}
+.tut-dots{display:flex;justify-content:center;gap:7px;margin:18px 0 4px}
+.tut-dots i{width:8px;height:8px;border-radius:50%;background:var(--axis);display:inline-block}
+.tut-dots i.on{background:var(--s1)}
+.tut-actions{display:flex;align-items:center;gap:10px;margin-top:14px}
 #settingsBtn{font-size:16px;padding:6px 12px;line-height:1}
 #settingsModal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:2500}
 .modal-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:22px 24px;width:min(400px,94vw);box-shadow:0 10px 40px rgba(0,0,0,.3)}
@@ -180,6 +189,20 @@ button.btn.primary:hover{color:#fff;filter:brightness(1.05)}
 </head>
 <body>
 <div id="toasts"></div>
+<div id="tutorial" style="display:none">
+  <div class="tut-card">
+    <div class="tut-emoji" id="tutEmoji">✈️</div>
+    <h2 id="tutTitle"></h2>
+    <p id="tutBody"></p>
+    <div class="tut-dots" id="tutDots"></div>
+    <div class="tut-actions">
+      <button class="btn" id="tutSkip"></button>
+      <span style="flex:1"></span>
+      <button class="btn" id="tutBack"></button>
+      <button class="btn primary" id="tutNext"></button>
+    </div>
+  </div>
+</div>
 <div id="login">
   <form id="loginForm" class="loginbox">
     <h1>G3X Flugbuch</h1>
@@ -218,6 +241,7 @@ button.btn.primary:hover{color:#fff;filter:brightness(1.05)}
       <div class="set-row"><label id="setFuelLbl">Verbrauch</label>
         <select id="u_fuel"><option value="lph">l/h</option><option value="gph">gal/h</option></select></div>
       <div class="modal-actions">
+        <button class="btn" id="setTut" style="margin-right:auto">Tutorial</button>
         <button class="btn" id="setCancel">Abbrechen</button>
         <button class="btn primary" id="setSave">Speichern</button>
       </div>
@@ -652,6 +676,7 @@ function applyStaticI18n(){
   $("#setMapLbl").textContent = T("Ladedruck"); $("#setAltLbl").textContent = T("Höhe");
   $("#setSpeedLbl").textContent = T("Geschwindigkeit"); $("#setFuelLbl").textContent = T("Verbrauch");
   $("#setCancel").textContent = T("Abbrechen"); $("#setSave").textContent = T("Speichern");
+  $("#setTut").textContent = cfg.lang === "en" ? "Tutorial" : "Tutorial";
 }
 // Settings-Modal
 $("#settingsBtn").addEventListener("click", () => {
@@ -660,6 +685,7 @@ $("#settingsBtn").addEventListener("click", () => {
   $("#settingsModal").style.display = "flex";
 });
 $("#setCancel").addEventListener("click", () => $("#settingsModal").style.display = "none");
+$("#setTut").addEventListener("click", () => { $("#settingsModal").style.display = "none"; showTutorial(); });
 $("#settingsModal").addEventListener("click", e => { if (e.target.id === "settingsModal") $("#settingsModal").style.display = "none"; });
 $("#setSave").addEventListener("click", async () => {
   const patch = { language: $("#setLang").value, units: {} };
@@ -673,6 +699,51 @@ $("#setSave").addEventListener("click", async () => {
     applyStaticI18n();
     if (state.current >= 0) renderDetail(state.flights[state.current]); else renderOverview();
   }
+});
+
+// ---- Erststart-Tutorial ----
+const TUTORIAL = {
+  de: [
+    { emoji:"✈️", title:"Willkommen im G3X Flugbuch", body:"Diese App wertet deine Garmin-G3X-Motorlogs aus — Grenzwerte, Diagramme und Karten. Alles läuft 100% lokal auf deinem Rechner." },
+    { emoji:"📁", title:"1. CSV-Ordner wählen", body:"Oben siehst du deinen CSV-Ordner. Über „Ordner ändern“ legst du fest, wo deine Logdateien liegen sollen." },
+    { emoji:"⬇️", title:"2. Logs hinzufügen", body:"Zieh CSV-Dateien einfach ins Fenster – oder lege sie direkt in den Ordner. Sie erscheinen automatisch in der Übersicht." },
+    { emoji:"⚙️", title:"3. Sprache & Einheiten", body:"Über das Zahnrad ⚙ oben rechts stellst du die Sprache und die Maßeinheiten um (°C/°F, psi/bar, ft/m …)." },
+  ],
+  en: [
+    { emoji:"✈️", title:"Welcome to G3X Flight Log", body:"This app analyses your Garmin G3X engine logs — limits, charts and maps. Everything runs 100% locally on your computer." },
+    { emoji:"📁", title:"1. Choose your CSV folder", body:"Your CSV folder is shown at the top. Use “Change folder” to pick where your log files should live." },
+    { emoji:"⬇️", title:"2. Add logs", body:"Drag CSV files into the window – or drop them straight into the folder. They appear in the overview automatically." },
+    { emoji:"⚙️", title:"3. Language & units", body:"Use the gear ⚙ at the top right to switch language and units (°C/°F, psi/bar, ft/m …)." },
+  ],
+};
+let tutStep = 0;
+function renderTut(){
+  const steps = TUTORIAL[cfg.lang] || TUTORIAL.en;
+  const s = steps[tutStep];
+  $("#tutEmoji").textContent = s.emoji;
+  $("#tutTitle").textContent = s.title;
+  $("#tutBody").textContent = s.body;
+  $("#tutDots").innerHTML = steps.map((_, i) => `<i class="${i === tutStep ? "on" : ""}"></i>`).join("");
+  $("#tutSkip").textContent = cfg.lang === "en" ? "Skip" : "Überspringen";
+  $("#tutBack").textContent = cfg.lang === "en" ? "Back" : "Zurück";
+  $("#tutBack").style.visibility = tutStep === 0 ? "hidden" : "visible";
+  const last = tutStep === steps.length - 1;
+  $("#tutNext").textContent = last ? (cfg.lang === "en" ? "Get started" : "Los geht’s")
+                                   : (cfg.lang === "en" ? "Next" : "Weiter");
+}
+async function finishTut(){
+  $("#tutorial").style.display = "none";
+  try {
+    if (window.desktop && window.desktop.setSettings) await window.desktop.setSettings({ tutorialSeen: true });
+    else localStorage.setItem("g3x-tut", "1");
+  } catch {}
+}
+function showTutorial(){ tutStep = 0; renderTut(); $("#tutorial").style.display = "flex"; }
+$("#tutSkip").addEventListener("click", finishTut);
+$("#tutBack").addEventListener("click", () => { if (tutStep > 0){ tutStep--; renderTut(); } });
+$("#tutNext").addEventListener("click", () => {
+  const steps = TUTORIAL[cfg.lang] || TUTORIAL.en;
+  if (tutStep < steps.length - 1){ tutStep++; renderTut(); } else finishTut();
 });
 
 // Desktop (Electron): Statusleiste mit Datenordner + Buttons.
@@ -708,6 +779,13 @@ async function boot(){
   try { await loadAll(); } catch(e){ console.error(e); return; }
   showOverview();
   if (openHash){ const idx = state.flights.findIndex(fl => fl.id === decodeURIComponent(openHash[1])); if (idx >= 0) showFlight(idx); }
+  // Erststart-Tutorial
+  let seen = false;
+  try {
+    if (window.desktop && window.desktop.getInfo){ const info = await window.desktop.getInfo(); seen = !!info.tutorialSeen; }
+    else seen = localStorage.getItem("g3x-tut") === "1";
+  } catch {}
+  if (!seen) showTutorial();
 }
 boot();
 
@@ -782,14 +860,15 @@ function renderOverview(){
 
   // Kacheln (immer über alle Logs)
   const nBy = t => fls.filter(fl => flType(fl) === t).length;
+  const mx = key => { const v = S.map(x => x[key]).filter(n => n != null); return v.length ? Math.max(...v) : null; };
   const tiles = [
     [T("Logs gesamt"), `${S.length} <span style="font-size:12px;color:var(--muted)">✈️ ${nBy("flight")} · 🔧 ${nBy("ground")} · 🔌 ${nBy("panel")}</span>`],
     [T("Motorlaufzeit"), fmtDur(total("runSecs"))],
     [T("Strecke gesamt"), fmtDist(total("dist"))],
     [T("Überschreitungen"), S.reduce((s,x) => s + x.nCrit, 0) + (cfg.lang==="en"?" red / ":" rot / ") + S.reduce((s,x) => s + x.nWarn, 0) + (cfg.lang==="en"?" yellow":" gelb")],
-    [T("Höchste Öltemp."), fmtV("oilT", Math.max(...S.map(x => x.maxOilT ?? -999)), 1) + " " + unitOf("oilT")],
-    [T("Höchste Drehzahl"), nf(Math.max(...S.map(x => x.maxRpm ?? 0)), 0) + " rpm"],
-    [T("Größte Höhe"), fmtV("alt", Math.max(...S.map(x => x.maxAlt ?? 0)), 0) + " " + unitOf("alt")],
+    [T("Höchste Öltemp."), fmtV("oilT", mx("maxOilT"), 1) + (mx("maxOilT")!=null?" "+unitOf("oilT"):"")],
+    [T("Höchste Drehzahl"), nf(mx("maxRpm"), 0) + (mx("maxRpm")!=null?" rpm":"")],
+    [T("Größte Höhe"), fmtV("alt", mx("maxAlt"), 0) + (mx("maxAlt")!=null?" "+unitOf("alt"):"")],
   ];
   $("#ovTiles").innerHTML = tiles.map(([n,v]) =>
     `<div class="tile"><div class="name">${n}</div><div class="val" style="font-size:18px">${v}</div></div>`).join("");

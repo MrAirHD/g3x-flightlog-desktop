@@ -113,20 +113,22 @@ function buildMenu() {
 
 // ---- IPC für das Frontend ----
 ipcMain.handle("desktop:getInfo", () => ({
-  dataDir: settings.dataDir, language: settings.language, units: settings.units, version: app.getVersion(),
+  dataDir: settings.dataDir, language: settings.language, units: settings.units,
+  tutorialSeen: !!settings.tutorialSeen, version: app.getVersion(),
 }));
 ipcMain.handle("desktop:chooseFolder", async () => { await chooseFolder(); return settings.dataDir; });
 ipcMain.handle("desktop:openFolder", () => shell.openPath(settings.dataDir));
 // Sprache/Einheiten aus dem Frontend speichern; Menü neu bauen, Seite neu laden.
 ipcMain.handle("desktop:setSettings", (_e, patch) => {
   if (patch && typeof patch === "object") {
+    const reload = patch.language != null || patch.units != null;
     if (patch.language) settings.language = patch.language;
     if (patch.units) settings.units = { ...settings.units, ...patch.units };
+    if (patch.tutorialSeen != null) settings.tutorialSeen = !!patch.tutorialSeen;
     save(settings);
-    buildMenu();
-    if (win) win.webContents.reload();
+    if (reload) { buildMenu(); if (win) win.webContents.reload(); }
   }
-  return { language: settings.language, units: settings.units };
+  return { language: settings.language, units: settings.units, tutorialSeen: settings.tutorialSeen };
 });
 
 async function createWindow() {

@@ -11,6 +11,7 @@ function defaults() {
     dataDir: path.join(app.getPath("documents"), "G3X-Flightlog"),
     language: (app.getLocale() || "en").toLowerCase().startsWith("de") ? "de" : "en",
     units: { temp: "C", press: "psi", map: "inHg", alt: "ft", speed: "kt", fuel: "lph" },
+    tutorialSeen: false,
   };
 }
 
