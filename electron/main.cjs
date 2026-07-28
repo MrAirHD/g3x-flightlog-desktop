@@ -3,8 +3,15 @@
 // Wahl + Sprachumschaltung (Menü). 100% lokal, keine Cloud, keine Ports nach außen.
 const { app, BrowserWindow, Menu, dialog, shell, ipcMain } = require("electron");
 const path = require("node:path");
+const crypto = require("node:crypto");
 const { pathToFileURL } = require("node:url");
 const { load, save } = require("./settings.cjs");
+
+// Index-Datei je CSV-Ordner in den App-Daten (der Ordner selbst bleibt sauber).
+function indexFileFor(dataDir) {
+  const h = crypto.createHash("sha1").update(path.resolve(dataDir)).digest("hex").slice(0, 16);
+  return path.join(app.getPath("userData"), "index", `idx-${h}.json`);
+}
 
 let settings = null;
 let backend = null;
@@ -35,7 +42,7 @@ async function startBackend(dataDir) {
     const mod = await import(pathToFileURL(path.join(__dirname, "..", "backend", "server.mjs")).href);
     createBackend = mod.createBackend;
   }
-  return createBackend({ dataDir });
+  return createBackend({ dataDir, stateFile: indexFileFor(dataDir) });
 }
 
 async function switchDataDir(newDir) {

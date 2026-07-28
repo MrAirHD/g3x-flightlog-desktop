@@ -1,4 +1,5 @@
-// Headless-Test des lokalen Backends: JSON-Store, Ingest, HTTP-API, Upload.
+// Headless-Test des lokalen Backends (In-Place-Modell): der CSV-Ordner wird
+// direkt gelesen, nichts verschoben, Index liegt separat.
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -9,54 +10,64 @@ const ok = (c, m) => { console.log(`${c ? "  OK " : "FAIL "} ${m}`); if (!c) fai
 const SAMPLE = "C:/Users/maxim/Downloads/log_20260516_113501______.csv";
 
 const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "g3xdesk-"));
+const folder = path.join(tmp, "MeineLogs");            // der CSV-Ordner des Nutzers
+const stateFile = path.join(tmp, "appdata", "idx.json"); // Index getrennt (App-Daten)
+await fs.mkdir(folder, { recursive: true });
 const sample = await fs.readFile(SAMPLE);
-await fs.mkdir(path.join(tmp, "ingest"), { recursive: true });
-await fs.writeFile(path.join(tmp, "ingest", "log_a.csv"), sample);
+await fs.writeFile(path.join(folder, "log_a.csv"), sample);
 
-const be = await createBackend({ dataDir: tmp, scanIntervalMs: 999999, quietMs: 0 });
+const be = await createBackend({ dataDir: folder, stateFile, quietMs: 0, scanIntervalMs: 999999 });
 const j = async (p, opt) => (await fetch(be.url + p, opt)).json();
 
-// Startscan hat die Ingest-Datei verarbeitet
 let list = await j("/api/flights");
-ok(list.total === 1, `Ingest beim Start: total=${list.total}`);
-ok(list.flights[0].summary.type === "ground", `Typ ground (${list.flights[0].summary.type})`);
-ok((await fs.readdir(path.join(tmp, "ingest"))).length === 0, "Eingang geleert");
-const fid = list.flights[0].id;
+ok(list.total === 1, `CSV im Ordner erkannt: total=${list.total}`);
+const id = list.flights[0].id;
 
-// Roh-CSV abrufbar
-const raw = await (await fetch(be.url + "/api/flights/" + encodeURIComponent(fid) + "/raw")).text();
-ok(raw.startsWith("#airframe_info") || raw.includes("RPM"), "Roh-CSV abrufbar");
+// KEINE Unterordner im CSV-Ordner angelegt (nur die eine CSV liegt drin)
+const inFolder = (await fs.readdir(folder, { withFileTypes: true }));
+ok(inFolder.every(e => e.isFile()), "keine Unterordner im CSV-Ordner angelegt");
+ok(inFolder.some(e => e.name === "log_a.csv"), "Originaldatei bleibt unverändert liegen");
 
-// Upload (neu) + Upload (dup)
-const fd1 = new FormData();
-fd1.append("file", new Blob([sample], { type: "text/csv" }), "b.csv");
-let up = await j("/api/upload", { method: "POST", body: fd1 });
-ok(up.counts.dup === 1, `identischer Upload -> Duplikat (${JSON.stringify(up.counts)})`);
+// Index liegt NICHT im CSV-Ordner (sondern in den App-Daten)
+ok(!(await fs.readdir(folder)).some(n => n.endsWith(".json")), "keine Index-/JSON-Datei im CSV-Ordner");
+ok(path.dirname(stateFile) !== folder, "Index-Ort liegt außerhalb des CSV-Ordners");
 
+// Roh-CSV wird aus der Originaldatei geliefert
+const raw = await (await fetch(be.url + "/api/flights/" + id + "/raw")).text();
+ok(raw.includes("RPM"), "Roh-CSV aus Originaldatei abrufbar");
+
+// Upload landet DIREKT im CSV-Ordner (anderer Inhalt -> neuer Flug)
 const csv2 = sample.toString("utf8").replace(/2026-05-16/g, "2026-05-17");
-const fd2 = new FormData();
-fd2.append("file", new Blob([csv2], { type: "text/csv" }), "c.csv");
-up = await j("/api/upload", { method: "POST", body: fd2 });
-ok(up.counts.new === 1, `neuer Upload -> new (${JSON.stringify(up.counts)})`);
+const fd = new FormData();
+fd.append("file", new Blob([csv2], { type: "text/csv" }), "log_b.csv");
+let up = await j("/api/upload", { method: "POST", body: fd });
+ok(up.counts.new === 1, `Upload -> neu (${JSON.stringify(up.counts)})`);
+ok((await fs.stat(path.join(folder, "log_b.csv"))).isFile(), "hochgeladene Datei liegt direkt im CSV-Ordner");
 ok((await j("/api/flights")).total === 2, "jetzt 2 Flüge");
 
-// Override + Filter
-await fetch(be.url + "/api/flights/" + encodeURIComponent(fid), {
-  method: "PATCH", headers: { "content-type": "application/json" },
-  body: JSON.stringify({ typeOverride: "flight" }) });
-ok((await j("/api/flights?type=flight")).total === 1, "Filter nach manuellem Typ");
+// Identischer Inhalt erneut -> Duplikat, kein zweiter Eintrag
+const fd2 = new FormData();
+fd2.append("file", new Blob([sample], { type: "text/csv" }), "log_a_kopie.csv");
+up = await j("/api/upload", { method: "POST", body: fd2 });
+ok(up.counts.dup === 1 && (await j("/api/flights")).total === 2, `identischer Inhalt -> Duplikat (${JSON.stringify(up.counts)})`);
 
-// Stats + Status
-const st = await j("/api/stats");
-ok(st.total === 2 && st.dateMin === "2026-05-16", `Stats total=${st.total} min=${st.dateMin}`);
-const status = await j("/api/status");
-ok(status.archiveWritable === true && status.dataDir === tmp, "Status: Archiv schreibbar, dataDir gesetzt");
+// Datei aus dem Ordner löschen (extern) -> verschwindet beim Scan aus der App
+await fs.unlink(path.join(folder, "log_b.csv"));
+const c = await j("/api/rescan", { method: "POST" });
+ok(c.counts.removed === 1, `gelöschte Datei entfernt (removed=${c.counts.removed})`);
+ok((await j("/api/flights")).total === 1, "App zeigt sie nicht mehr");
 
-// Persistenz: Store neu laden (neues Backend, gleicher Ordner)
+// Override + Persistenz
+await fetch(be.url + "/api/flights/" + id, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ typeOverride: "flight" }) });
 await be.close();
-const be2 = await createBackend({ dataDir: tmp, scanIntervalMs: 999999, quietMs: 0 });
-ok((await (await fetch(be2.url + "/api/flights")).json()).total === 2, "Persistenz: 2 Flüge nach Neustart");
-ok((await (await fetch(be2.url + "/api/flights?type=flight")).json()).total === 1, "Persistenz: Override erhalten");
+const be2 = await createBackend({ dataDir: folder, stateFile, quietMs: 0, scanIntervalMs: 999999 });
+ok((await (await fetch(be2.url + "/api/flights")).json()).total === 1, "Persistenz nach Neustart");
+ok((await (await fetch(be2.url + "/api/flights?type=flight")).json()).total === 1, "Override erhalten");
+
+// Löschen über die App entfernt die echte Datei
+await fetch(be2.url + "/api/flights/" + id, { method: "DELETE" });
+let gone = false; try { await fs.stat(path.join(folder, "log_a.csv")); } catch { gone = true; }
+ok(gone, "Löschen in der App entfernt die CSV aus dem Ordner");
 await be2.close();
 
 await fs.rm(tmp, { recursive: true, force: true });

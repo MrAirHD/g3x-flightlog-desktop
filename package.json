@@ -35,8 +35,8 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "multiLanguageInstaller": true,
+      "displayLanguageSelector": true,
       "installerLanguages": ["en_US", "de_DE"],
-      "language": "1033",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "G3X Flugbuch"

@@ -1,6 +1,6 @@
-// Lokales Backend für die Desktop-App (Electron). Kein Login, nur an 127.0.0.1
-// gebunden. Speichert in einem frei wählbaren Datenordner. Wiederverwendet
-// denselben Parser (core) und dieselbe Ingest-Pipeline wie die Server-Version.
+// Lokales Backend für die Desktop-App (Electron). Kein Login, nur an 127.0.0.1.
+// Liest die CSVs DIREKT im gewählten Ordner (keine Unterordner, nichts wird
+// verschoben). Der Index liegt separat in den App-Daten (stateFile).
 import Fastify from "fastify";
 import multipart from "@fastify/multipart";
 import fstatic from "@fastify/static";
@@ -10,28 +10,23 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { makeJsonStore } from "./store-json.mjs";
-import { makeIngest } from "./ingest.mjs";
+import { makeFolderScan } from "./folder-scan.mjs";
 
 const require = createRequire(import.meta.url);
 const core = require("../core/g3x-core.cjs");
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 
-// Startet ein Backend für genau einen Datenordner. Rückgabe: { url, port, close, scan, dataDir }.
-export async function createBackend({ dataDir, host = "127.0.0.1", port = 0, scanIntervalMs = 10000, quietMs = 2500 } = {}) {
-  const dirs = {
-    ingest:  path.join(dataDir, "ingest"),
-    archive: path.join(dataDir, "archive"),
-    uploads: path.join(dataDir, "uploads"),
-  };
-  const stateDir = path.join(dataDir, "state");
-  for (const d of [...Object.values(dirs), stateDir]) await fs.mkdir(d, { recursive: true });
+// dataDir = der CSV-Ordner (wird in-place gelesen). stateFile = Index in App-Daten.
+export async function createBackend({ dataDir, stateFile, host = "127.0.0.1", port = 0, scanIntervalMs = 8000, quietMs = 2500 } = {}) {
+  await fs.mkdir(dataDir, { recursive: true });
+  if (!stateFile) stateFile = path.join(dataDir, ".g3x-index.json");
 
-  const store = makeJsonStore(path.join(stateDir, "store.json"));
+  const store = makeJsonStore(stateFile);
   const app = Fastify({ logger: false });
   await app.register(multipart, { limits: { fileSize: 200 * 1024 * 1024, files: 500 } });
 
-  const ingest = makeIngest({ store, core, dirs, quietMs, log: () => {} });
+  const scanner = makeFolderScan({ store, core, getDataDir: () => dataDir, quietMs, log: () => {} });
 
   // ---- API ----
   app.get("/api/me", async () => ({ authed: true, needsPassword: false }));
@@ -58,10 +53,10 @@ export async function createBackend({ dataDir, host = "127.0.0.1", port = 0, sca
   app.get("/api/flights/:id/raw", async (req, reply) => {
     const r = store.get(req.params.id);
     if (!r) return reply.code(404).send({ error: "not_found" });
-    try { await fs.access(r.archivedPath); }
-    catch { return reply.code(410).send({ error: "archive_missing" }); }
+    try { await fs.access(r.sourcePath); }
+    catch { return reply.code(410).send({ error: "file_missing" }); }
     reply.header("content-type", "text/csv; charset=utf-8");
-    return reply.send(createReadStream(r.archivedPath));
+    return reply.send(createReadStream(r.sourcePath));
   });
   app.patch("/api/flights/:id", async (req, reply) => {
     const r = store.get(req.params.id);
@@ -71,37 +66,45 @@ export async function createBackend({ dataDir, host = "127.0.0.1", port = 0, sca
     store.setOverride(req.params.id, val);
     return { ok: true, typeOverride: val };
   });
+  // Löschen entfernt die tatsächliche CSV aus dem Ordner (und aus dem Index).
   app.delete("/api/flights/:id", async (req, reply) => {
     const r = store.get(req.params.id);
     if (!r) return reply.code(404).send({ error: "not_found" });
+    try { await fs.unlink(r.sourcePath); } catch {}
     store.remove(req.params.id);
-    try { await fs.unlink(r.archivedPath); } catch {}
     return { ok: true };
   });
 
-  app.post("/api/rescan", async () => ({ ok: true, counts: await ingest.scan() }));
+  app.post("/api/rescan", async () => ({ ok: true, counts: await scanner.scan() }));
 
+  // Drag&drop: Datei DIREKT in den CSV-Ordner kopieren (atomar), dann scannen.
   app.post("/api/upload", async (req) => {
     let saved = 0;
     for await (const part of req.parts()) {
       if (part.type !== "file") continue;
       if (!part.filename || !part.filename.toLowerCase().endsWith(".csv")) { part.file.resume(); continue; }
-      const safe = "up_" + Date.now() + "_" + part.filename.replace(/[^A-Za-z0-9._-]/g, "_");
-      const dest = path.join(dirs.uploads, safe);
+      const base = part.filename.replace(/[\\/]/g, "_").replace(/[^A-Za-z0-9._ -]/g, "_");
+      let target = path.join(dataDir, base);
+      // Namenskollision -> Suffix, damit keine fremde Datei überschrieben wird.
+      try {
+        let i = 1;
+        for (;;) { try { await fs.access(target); } catch { break; }
+          const ext = path.extname(base), stem = base.slice(0, -ext.length || undefined);
+          target = path.join(dataDir, `${stem} (${i++})${ext}`); }
+      } catch {}
       const chunks = [];
       for await (const ch of part.file) chunks.push(ch);
-      await fs.writeFile(dest + ".part", Buffer.concat(chunks));
-      await fs.rename(dest + ".part", dest);
+      await fs.writeFile(target + ".part", Buffer.concat(chunks));
+      await fs.rename(target + ".part", target);
       saved++;
     }
-    return { ok: true, saved, counts: await ingest.scan() };
+    return { ok: true, saved, counts: await scanner.scan() };
   });
 
-  // Schreibprobe (lokal praktisch immer ok, aber der Status wird im UI genutzt).
-  let archiveWritable = true;
-  try { const p = path.join(dirs.archive, ".write-test"); await fs.writeFile(p, "ok"); await fs.unlink(p); }
-  catch { archiveWritable = false; }
-  app.get("/api/status", async () => ({ archiveWritable, dataDir, ingest: dirs.ingest, archive: dirs.archive }));
+  let writable = true;
+  try { const p = path.join(dataDir, ".g3x-write-test"); await fs.writeFile(p, "ok"); await fs.unlink(p); }
+  catch { writable = false; }
+  app.get("/api/status", async () => ({ archiveWritable: writable, dataDir }));
 
   // ---- Statik: SPA + geteilter Core + vendored Leaflet ----
   await app.register(fstatic, { root: path.join(ROOT, "app"), prefix: "/", index: ["index.html"] });
@@ -110,18 +113,16 @@ export async function createBackend({ dataDir, host = "127.0.0.1", port = 0, sca
     return reply.send(createReadStream(path.join(ROOT, "core", "g3x-core.cjs")));
   });
 
-  await ingest.scan();
-  const timer = setInterval(() => ingest.scan().catch(() => {}), scanIntervalMs);
+  await scanner.scan();
+  const timer = setInterval(() => scanner.scan().catch(() => {}), scanIntervalMs);
 
   await app.listen({ port, host });
   const actualPort = app.server.address().port;
 
   return {
     url: `http://${host}:${actualPort}`,
-    port: actualPort,
-    dataDir,
-    dirs,
-    scan: () => ingest.scan(),
+    port: actualPort, dataDir,
+    scan: () => scanner.scan(),
     async close() { clearInterval(timer); try { await store.flush(); } catch {} await app.close(); },
   };
 }

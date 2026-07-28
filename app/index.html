@@ -191,10 +191,10 @@ button.btn.primary:hover{color:#fff;filter:brightness(1.05)}
   <div id="meta"></div>
 
   <div id="desktopBar" style="display:none">
-    <span class="db-label">Datenordner:</span>
+    <span class="db-label">CSV-Ordner:</span>
     <code id="dbPath" title=""></code>
     <button class="btn" id="dbChange">Ordner ändern</button>
-    <button class="btn" id="dbOpen">Ordner öffnen</button>
+    <button class="btn" id="dbOpen">Im Explorer öffnen</button>
   </div>
 
   <div id="drop" tabindex="0">
@@ -420,7 +420,7 @@ async function initDesktopBar(){
     $("#dbPath").title = info.dataDir;
     bar.style.display = "flex";
     const small = drop.querySelector(".small");
-    if (small) small.textContent = "Die Dateien werden in den Datenordner übernommen und dort archiviert. Du kannst CSVs auch direkt in den Unterordner „ingest“ legen.";
+    if (small) small.textContent = "Die Dateien werden in deinen CSV-Ordner kopiert. Du kannst CSVs auch direkt in diesen Ordner legen — sie erscheinen automatisch.";
   } catch {}
   $("#dbChange").onclick = () => window.desktop.chooseFolder();   // Backend startet neu + Fenster lädt neu
   $("#dbOpen").onclick = () => window.desktop.openFolder();
@@ -579,7 +579,7 @@ function renderOverview(){
     li.addEventListener("click", () => showFlight(idx));
     li.querySelector(".fl-x").addEventListener("click", async e => {
       e.stopPropagation();
-      if (!confirm(`${tm.label} vom ${fmtDateDE(s.date)} ${s.start.slice(0,5)} entfernen?\n\nDie archivierte CSV wird dabei gelöscht.`)) return;
+      if (!confirm(`${tm.label} vom ${fmtDateDE(s.date)} ${s.start.slice(0,5)} entfernen?\n\nDie CSV-Datei wird dabei aus dem Ordner gelöscht.`)) return;
       try { await api(`/api/flights/${encodeURIComponent(fl.id)}`, { method:"DELETE" }); }
       catch(err){ toast("Löschen fehlgeschlagen", err.message, "err", 8000); return; }
       state.flights.splice(idx, 1);
