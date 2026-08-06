@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "description": "G3X Flight Log — 100% local desktop app to analyse Garmin G3X engine logs (Rotax 915 iS)",
-  "author": "Maximilian Rabl <maximilian.rabl@gmx.at>",
+  "author": "MrAirHD",
   "license": "UNLICENSED",
   "main": "electron/main.cjs",
   "scripts": {
@@ -24,7 +24,7 @@
     "electron-builder": "^25.1.8"
   },
   "build": {
-    "appId": "at.oefpm.g3xflightlog",
+    "appId": "com.mrairhd.g3xflightlog",
     "productName": "G3X Flight Log",
     "artifactName": "G3X-Flight-Log-Setup-${version}.${ext}",
     "asar": false,

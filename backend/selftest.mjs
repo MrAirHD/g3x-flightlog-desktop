@@ -7,7 +7,7 @@ import { createBackend } from "./server.mjs";
 
 let fails = 0;
 const ok = (c, m) => { console.log(`${c ? "  OK " : "FAIL "} ${m}`); if (!c) fails++; };
-const SAMPLE = "C:/Users/maxim/Downloads/log_20260516_113501______.csv";
+const SAMPLE = process.env.G3X_SAMPLE || "test/sample.csv";
 
 const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "g3xdesk-"));
 const folder = path.join(tmp, "MeineLogs");            // der CSV-Ordner des Nutzers
