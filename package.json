@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "G3X Flugbuch & Motoranalyse — 100% lokale Desktop-App (Rotax 915 iS)",
+  "description": "G3X Flight Log — 100% local desktop app to analyse Garmin G3X engine logs (Rotax 915 iS)",
   "author": "Maximilian Rabl <maximilian.rabl@gmx.at>",
   "license": "UNLICENSED",
   "main": "electron/main.cjs",
@@ -24,9 +24,9 @@
     "electron-builder": "^25.1.8"
   },
   "build": {
-    "appId": "at.oefpm.g3xflugbuch",
-    "productName": "G3X Flugbuch",
-    "artifactName": "G3X-Flugbuch-Setup-${version}.${ext}",
+    "appId": "at.oefpm.g3xflightlog",
+    "productName": "G3X Flight Log",
+    "artifactName": "G3X-Flight-Log-Setup-${version}.${ext}",
     "asar": false,
     "files": ["electron/**", "backend/**", "core/**", "app/**", "build/icon.ico", "node_modules/**", "package.json"],
     "directories": { "output": "release", "buildResources": "build" },
@@ -50,7 +50,7 @@
       "installerLanguages": ["en_US", "de_DE"],
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "G3X Flugbuch"
+      "shortcutName": "G3X Flight Log"
     }
   }
 }

@@ -1,96 +1,94 @@
-# G3X Flugbuch & Motoranalyse — Desktop (100% lokal)
+<div align="center">
 
-Windows-Desktop-App (Electron) zur Auswertung der Garmin-G3X-Motorlogs für den
-**Rotax 915 iS**. **Vollständig offline** — keine Cloud, kein Server, kein Login.
-Du wählst einen **Datenordner**, ziehst CSVs per **Drag&drop** hinein (oder legst
-sie direkt in dessen `ingest/`-Unterordner), und die App liest sie automatisch
-ein, klassifiziert jeden Log (✈️ Flug / 🔧 Standlauf / 🔌 Nur Avionik), prüft die
-Rotax-Grenzwerte (OM-915 i A) und zeigt Zeitleiste, Karten und Diagramme.
+# ✈️ G3X Flight Log
 
-Dies ist die lokale Schwester der self-hosted Server-Variante
-([g3x-flugbuch](https://github.com/MrAirHD/g3x-flugbuch)) und nutzt denselben
-Parser, dieselbe Ingest-Pipeline und dasselbe Frontend — nur ohne Docker/Auth,
-mit lokalem JSON-Speicher statt SQLite.
+**See what your engine did — in plain, clear numbers.**
+A free desktop app that turns the flight logs from your **Garmin G3X** into
+easy-to-read charts, maps and warnings. Built around the **Rotax 915 iS**.
 
-*A fully local Windows desktop app to analyse Garmin G3X engine logs (Rotax 915
-iS). No cloud, no server, no login. Pick a data folder, drag & drop CSVs in, done.*
+**100% on your computer. No cloud, no account, no internet needed.**
 
-## Datenordner & Ablauf
-- **Datenordner** (Standard: `Dokumente\G3X-Flugbuch`) enthält:
-  `ingest/` (Eingang), `archive/` (verarbeitet, nach Jahr; `_duplicates/`,
-  `_errors/`), `uploads/` (Drag&drop-Zwischenablage), `state/` (Index).
-- **Neue Logs**: per Drag&drop ins Fenster **oder** direkt in `ingest/` kopieren.
-- **Dedup** über Inhalts-Hash (SHA-256) — dieselbe Datei wird nie doppelt geführt.
-- Ordner wechseln jederzeit über die Leiste oben oder Menü **Datei → Datenordner
-  wählen…**.
+<a href="https://www.buymeacoffee.com/mrairhd" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" style="height: 60px !important;width: 217px !important;" ></a>
 
-## Installer bauen (erzeugt die .exe)
-Voraussetzung: Node.js 18+ und Windows.
+<br>
 
-> **Einmalig nötig:** Windows **Entwicklermodus** einschalten
-> (*Einstellungen → Datenschutz & Sicherheit → Für Entwickler → Entwicklermodus:
-> Ein*) **oder** das Terminal **als Administrator** öffnen. Grund: electron-builder
-> entpackt sein Signatur-Werkzeug mit Symlinks, was sonst am fehlenden Recht
-> scheitert. Ohne das bricht `npm run dist` beim Schritt „winCodeSign" ab.
+![G3X Flight Log](docs/screenshot-overview.png)
 
-```bash
-npm install
-npm run dist        # -> release\G3X-Flugbuch-Setup-1.0.0.exe
-```
-Der **Installer fragt beim Start nach der Sprache (English / Deutsch)** und lässt
-den Installationsordner wählen (kein „One-Click"). Danach liegt „G3X Flugbuch" im
-Startmenü und auf dem Desktop.
+</div>
 
-Nur die App als Ordner (ohne Installer, umgeht das obige Recht) zum Ausprobieren:
-```bash
-npm run dist -- --dir     # -> release\win-unpacked\G3X Flugbuch.exe
-```
+---
 
-### macOS-Installer (.dmg) bauen
-> **Muss auf einem Mac gebaut werden** — electron-builder kann macOS-Apps nicht
-> unter Windows/Linux erzeugen. Die Konfiguration (Icon, dmg, Universal arm64+x64)
-> ist bereits im Projekt vorbereitet.
+## ⬇️ Download
 
-```bash
-# auf einem Mac (Node.js 18+):
-npm install
-npm run dist:mac          # -> release/G3X-Flight-Log-1.0.0-arm64.dmg  (+ x64)
-```
-Die App ist **nicht signiert/notarisiert**. Beim ersten Öffnen meldet Gatekeeper
-„nicht verifizierter Entwickler“ — dann per **Rechtsklick → Öffnen** (bzw.
-*Systemeinstellungen → Datenschutz & Sicherheit → Trotzdem öffnen*) starten.
-Für eine signierte/notarisierte Version braucht es ein Apple-Developer-Konto
-(`CSC_LINK`/`APPLE_ID` als Umgebungsvariablen).
+**[➡️ Download the latest version](../../releases/latest)**
 
-*Build the installer with `npm run dist`; the NSIS setup asks for its language
-(English/German) at launch.*
+1. On the [releases page](../../releases/latest), download
+   **`G3X-Flight-Log-…-win64-portable.zip`**.
+2. **Unzip** it anywhere you like (e.g. your Desktop).
+3. Open the folder and double-click **`G3X Flight Log.exe`**.
 
-## Entwicklung / direkt starten
-```bash
-npm install
-npm start           # startet Electron im Dev-Modus
-npm test            # Backend-Tests (Ingest/Dedup/Upload/Persistenz)
-```
+That's it — no installation, no admin rights. *(Windows may show a blue
+"Windows protected your PC" notice the first time because the app isn't
+code-signed. Click **More info → Run anyway**.)*
 
-## Menü
-- **Datei**: Datenordner wählen…, Datenordner öffnen, Jetzt neu einlesen, Beenden
-- **Sprache**: English / Deutsch (Menü-Sprache; die Analyse-Oberfläche ist
-  aktuell deutsch)
-- **Ansicht**: Neu laden, Entwicklertools, Vollbild, Zoom
+Prefer a proper installer with Start-menu entry? A `Setup.exe` is available on
+the releases page too.
 
-## Technik
-- **Electron** (Fenster) + im selben Prozess ein lokales Fastify-Backend, nur an
-  `127.0.0.1` auf einem zufälligen Port — nichts ist von außen erreichbar.
-- **`core/g3x-core.cjs`**: Parser + Rotax-Grenzwerte + Klassifizierung (geteilt
-  mit der Server-Variante).
-- **`backend/`**: `server.mjs` (lokale API), `ingest.mjs` (Ordner-Watch/Dedup/
-  Archiv), `store-json.mjs` (JSON-Index, kein natives Modul).
-- **`app/`**: Frontend + lokal eingebundenes Leaflet (nur die OSM-Kartenkacheln
-  kommen aus dem Internet; ohne Netz zeichnet die Detailkarte einen Umriss).
+---
 
-## Hinweise
-- Ein eigenes App-Icon kannst du unter `build/icon.ico` ablegen (256×256), sonst
-  nutzt electron-builder das Standard-Electron-Icon.
-- Grenzwerte lt. BRP-Rotax Operators Manual OM-915 i A (Rev. 2); „abgeleitete"
-  Vorwarnbereiche sind keine offiziellen Limits. Maßgeblich bleiben Operators
-  Manual und Flughandbuch.
+## What it does
+
+- 📂 **Pick one folder** for your CSV logs. Drag & drop files onto the window, or
+  just drop them into that folder — they appear automatically.
+- 🗂️ **Flight logbook** — every log listed by date, sorted, with filters
+  (flights / ground runs / avionics-only, by month, only-with-warnings).
+- 🚦 **Traffic-light checks** against the Rotax limits — green / yellow / red for
+  RPM, oil & coolant temperature, oil & fuel pressure, EGT, and more, with the
+  exact time and peak of every exceedance.
+- 🗺️ **Map of every flight** (OpenStreetMap) — hover the track to see height,
+  speed, RPM, fuel flow and temperatures for that exact second.
+- 📊 **Clear charts** for the whole flight, plus every value the G3X records.
+- 🌐 **English or German**, switchable any time.
+- 📏 **Choose your units** — °C/°F, psi/bar, ft/m, kt/km-h, and more.
+- 🖨️ **Print or save any flight as a PDF** report.
+
+Your files are never moved or changed — the app only reads them. Delete a CSV
+from the folder and it disappears from the app; delete it inside the app and the
+file is removed from the folder. Simple and predictable.
+
+---
+
+## How to use it
+
+1. **Start the app.** On first run it creates a folder for your logs
+   (Documents → *G3X-Flightlog*). You can change it any time with **Change
+   folder**.
+2. **Add logs.** Copy the `.csv` files from your G3X SD-card into that folder, or
+   drag them onto the window.
+3. **Open a flight.** Click any entry in the list to see the full report —
+   overview tiles, warnings, map and charts.
+4. **Settings (⚙️, top right).** Switch **language** and **measurement units**.
+
+---
+
+## Good to know
+
+- **Private by design.** Everything runs on your PC. Nothing is uploaded. The
+  only thing fetched from the internet is the background map imagery — and if
+  you're offline, the map simply draws the track as an outline instead.
+- **Not an official Rotax tool.** The limit values follow the BRP-Rotax
+  Operator's Manual OM-915 i A; some intermediate "caution" zones are added by
+  this app to warn early. **The current Operator's Manual and your aircraft's
+  flight manual always take precedence.**
+
+---
+
+## Support
+
+If this saved you time, a coffee is very welcome 🙏
+
+<a href="https://www.buymeacoffee.com/mrairhd" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" style="height: 60px !important;width: 217px !important;" ></a>
+
+---
+
+<sub>Developer / build it yourself → [TECHNICAL.md](TECHNICAL.md)</sub>
