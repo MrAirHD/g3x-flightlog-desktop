@@ -100,6 +100,8 @@ function parseG3X(text){
   const timeIdx = header.indexOf("Time (hh:mm:ss)");
   const dateIdx = header.indexOf("Date (yyyy-mm-dd)");
   const casIdx  = header.indexOf("CAS Alert");
+  const utcIdx  = header.indexOf("UTC Time (hh:mm:ss)");
+  const offIdx  = header.indexOf("UTC Offset (hh:mm)");
   if (timeIdx < 0 || header.indexOf("RPM") < 0)
     throw new Error("Das sieht nicht nach einem G3X-Log aus (Spalten 'Time'/'RPM' fehlen).");
 
@@ -128,7 +130,10 @@ function parseG3X(text){
     sec += day*86400;
     prevSec = sec;
 
+    const uraw = utcIdx >= 0 ? (c[utcIdx] || "") : "";
     const r = { sec, timeStr: t.slice(0,8), date: dateIdx >= 0 ? c[dateIdx] : "",
+                utc: /^\d\d:\d\d:\d\d/.test(uraw) ? uraw.slice(0,8) : "",
+                utcOff: offIdx >= 0 ? (c[offIdx] || "") : "",
                 cas: casIdx >= 0 ? (c[casIdx] || "") : "" };
     for (const col of catalog){
       if (col.kind === "known"){
@@ -243,10 +248,178 @@ function computeTrack(rows){
   return { pts, dist };
 }
 
+/* ---------- UTC ----------
+   G3X loggt Lokalzeit UND UTC-Zeit ("UTC Time") samt Zonenversatz
+   ("UTC Offset", z. B. "+02:00"). Fehlt die UTC-Spalte in einzelnen Zeilen
+   (z. B. vor dem GPS-Fix), rechnen wir sie aus dem Versatz zurück. */
+const hms = s => +s.slice(0,2)*3600 + +s.slice(3,5)*60 + +s.slice(6,8);
+function clockStr(sec){
+  sec = ((Math.round(sec) % 86400) + 86400) % 86400;
+  const p = n => String(n).padStart(2, "0");
+  return `${p(Math.floor(sec/3600))}:${p(Math.floor(sec/60)%60)}:${p(sec%60)}`;
+}
+/* Zonenversatz des Logs in Minuten (Lokalzeit = UTC + Versatz), sonst null. */
+function utcOffsetMin(rows){
+  for (const r of rows){
+    const m = /^([+-])(\d\d):(\d\d)$/.exec((r.utcOff || "").trim());
+    if (m) return (m[1] === "-" ? -1 : 1) * (+m[2]*60 + +m[3]);
+  }
+  for (const r of rows){
+    if (!r.utc || !r.timeStr) continue;
+    let d = Math.round((hms(r.timeStr) - hms(r.utc)) / 60);
+    if (d >  840) d -= 1440;          // über Mitternacht
+    if (d < -840) d += 1440;
+    return Math.round(d / 15) * 15;   // Zeitzonen sind Vielfache von 15 min
+  }
+  return null;
+}
+const offsetStr = min => min == null ? ""
+  : `${min < 0 ? "-" : "+"}${String(Math.floor(Math.abs(min)/60)).padStart(2,"0")}:${String(Math.abs(min)%60).padStart(2,"0")}`;
+/* UTC-Uhrzeit einer Zeile: bevorzugt die geloggte Spalte, sonst gerechnet. */
+function utcOf(row, offMin){
+  if (row && row.utc) return row.utc;
+  if (!row || offMin == null) return "";
+  return clockStr(hms(row.timeStr) - offMin*60);
+}
+
+/* ---------- Startlauf (Startstrecke) ----------
+   Ermittelt den ERSTEN Start im Log: Beginn des Startlaufs (Losrollen mit
+   Startleistung) bis zum Abheben, dazu die Strecke über Grund. Enthält ein Log
+   mehrere Starts (Platzrunden, Touch&Go), wird nur der erste ausgewertet.
+
+   Strecke = Integral der GPS-Groundspeed über die Zeit (Trapezregel). Das ist
+   genauer als „Zeit × Abhebegeschwindigkeit“ (die Beschleunigung ist nicht
+   linear) und robuster als das Aufsummieren der GPS-Positionen (Zittern).
+   Ergebnis ist die Strecke ÜBER GRUND — also inklusive Wind- und
+   Hangneigungseinfluss, genau wie eine am Platz gemessene Startrollstrecke. */
+function integrateGs(rows, from, tEnd){
+  let m = 0;
+  for (let i = from + 1; i < rows.length; i++){
+    const t0 = rows[i-1].sec, t1 = rows[i].sec;
+    if (t0 >= tEnd) break;
+    const dt = t1 - t0;
+    if (dt <= 0 || dt > 5) continue;            // Lücke im Log -> nicht raten
+    const v0 = rows[i-1].gndSpd, v1 = rows[i].gndSpd;
+    if (v0 == null || v1 == null) continue;
+    const f = Math.min(1, (tEnd - t0) / dt);    // letztes Stück nur anteilig
+    m += (v0 + (v0 + (v1 - v0) * f)) / 2 * 0.514444 * (dt * f);   // kt -> m/s
+  }
+  return m;
+}
+/* Zeitpunkt, zu dem die Höhe `target` durchstoßen wird — nicht auf die volle
+   Sekunde gerundet, sondern aus den ersten Steigflug-Sekunden extrapoliert.
+   Bei 1 Hz und ~700 ft/min Steigrate liegt der erste Messpunkt über der
+   Schwelle sonst bis zu eine Sekunde zu spät, was die Strecke um gut 10 %
+   zu lang macht. */
+function crossingTime(rows, idx, target, altOf){
+  const pts = [];
+  for (let i = idx; i < rows.length && i <= idx + 6; i++){
+    const a = altOf(rows[i]);
+    if (a != null) pts.push([rows[i].sec, a]);
+  }
+  if (pts.length < 2) return rows[idx].sec;
+  const t0 = pts[0][0];
+  let sx = 0, sy = 0, sxx = 0, sxy = 0;
+  for (const [t, a] of pts){ const x = t - t0; sx += x; sy += a; sxx += x*x; sxy += x*a; }
+  const den = pts.length * sxx - sx * sx;
+  if (den === 0) return rows[idx].sec;
+  const slope = (pts.length * sxy - sx * sy) / den;      // ft/s
+  const icept = (sy - slope * sx) / pts.length;
+  if (slope <= 0.5) return rows[idx].sec;                // kein plausibler Steigflug
+  const t = t0 + (target - icept) / slope;
+  // höchstens bis zum vorigen Messpunkt zurück — Ausreißer nicht durchreichen
+  return Math.min(rows[idx].sec, Math.max(rows[Math.max(0, idx-1)].sec, t));
+}
+function detectTakeoff(rows){
+  const n = rows.length;
+  if (n < 20) return null;
+
+  // 1) Erste anhaltende Flugphase: Groundspeed > 45 kt für mindestens 20 s.
+  const AIR_KT = 45, HOLD_S = 20;
+  let air = -1;
+  for (let i = 0; i < n; i++){
+    if ((rows[i].gndSpd ?? 0) <= AIR_KT) continue;
+    const tEnd = rows[i].sec + HOLD_S;
+    let j = i, ok = true;
+    for (; j < n && rows[j].sec <= tEnd; j++) if ((rows[j].gndSpd ?? 0) <= 30){ ok = false; break; }
+    if (ok && rows[Math.min(j, n-1)].sec >= tEnd){ air = i; break; }
+    i = j;
+  }
+  if (air < 0) return null;
+
+  // 2) Rollbeginn: letzter Messpunkt vor dem Start, an dem das Flugzeug noch
+  //    steht (Bremsen lösen). Bei fliegendem Start (nie < 3 kt) ersatzweise der
+  //    Moment, in dem die Drehzahl Richtung Startleistung geht.
+  const WIN_S = 180;
+  let roll = -1;
+  for (let i = air; i >= 0 && rows[air].sec - rows[i].sec <= WIN_S; i--)
+    if ((rows[i].gndSpd ?? 0) < 3){ roll = i; break; }
+  let method = "brakerelease";
+  if (roll < 0){
+    let rpmMax = 0;
+    for (let i = air; i >= 0 && rows[air].sec - rows[i].sec <= WIN_S; i--)
+      rpmMax = Math.max(rpmMax, rows[i].rpm ?? 0);
+    if (rpmMax <= 0) return null;
+    for (let i = air; i >= 0 && rows[air].sec - rows[i].sec <= WIN_S; i--)
+      if ((rows[i].rpm ?? 0) < 0.75 * rpmMax){ roll = i; break; }
+    method = "power";
+  }
+  if (roll < 0 || roll >= n - 2) return null;
+
+  // 3) Platzhöhe = Median der Höhe in den 10 s vor dem Losrollen.
+  const altOf = r => r.alt ?? r.gpsAlt ?? null;
+  const base = [];
+  for (let i = roll; i >= 0 && rows[roll].sec - rows[i].sec <= 10; i--){
+    const a = altOf(rows[i]);
+    if (a != null) base.push(a);
+  }
+  if (!base.length) return null;
+  base.sort((a,b) => a-b);
+  const field = base[base.length >> 1];
+
+  // 4) Abheben: erster Punkt, ab dem die Höhe dauerhaft steigt. Zuerst den
+  //    eindeutigen Steigflug (+50 ft) suchen, dann bis +10 ft zurückgehen —
+  //    so stört das Rauschen der Baro-Höhe am Boden (±5 ft) nicht.
+  let climb = -1;
+  for (let i = roll + 1; i < n && rows[i].sec - rows[roll].sec <= WIN_S; i++){
+    const a = altOf(rows[i]);
+    if (a != null && a - field >= 50){ climb = i; break; }
+  }
+  if (climb < 0) return null;
+  let lift = climb;
+  while (lift > roll + 1){
+    const a = altOf(rows[lift-1]);
+    if (a == null || a - field > 10) lift--; else break;
+  }
+
+  const liftT   = crossingTime(rows, lift, field, altOf);
+  const climbT  = Math.max(liftT, crossingTime(rows, climb, field + 50, altOf));
+  const dur     = liftT - rows[roll].sec;
+  const liftGs  = rows[lift].gndSpd;
+  if (dur < 3 || dur > 120) return null;          // unplausibel -> lieber nichts zeigen
+  if (liftGs == null || liftGs < 20) return null;
+
+  const distRoll = integrateGs(rows, roll, liftT);
+  const dist50   = integrateGs(rows, roll, climbT);
+  if (!(distRoll > 30)) return null;
+
+  const offMin = utcOffsetMin(rows);
+  return {
+    rollSec: rows[roll].sec, rollStr: rows[roll].timeStr, rollUtc: utcOf(rows[roll], offMin),
+    liftSec: rows[lift].sec, liftStr: rows[lift].timeStr, liftUtc: utcOf(rows[lift], offMin),
+    dur, dur50: climbT - rows[roll].sec,
+    distRoll, dist50,
+    liftGs, liftIas: rows[lift].ias ?? null,
+    liftRpm: rows[lift].rpm ?? null, liftMap: rows[lift].map ?? null,
+    field, oat: rows[roll].oat ?? null,
+    method,
+  };
+}
+
 /* Kurzzusammenfassung eines Flugs für die Zeitleiste.
    Version hochzählen, wenn sich die Struktur ändert -> gespeicherte
    Zusammenfassungen werden dann automatisch neu berechnet. */
-const SUMMARY_VER = 3;
+const SUMMARY_VER = 4;
 function summarize(parsed){
   const rows = parsed.rows;
   const t0 = rows[0], t1 = rows[rows.length-1];
@@ -284,12 +457,17 @@ function summarize(parsed){
     trackLL.push([Math.round(p[p.length-1].lat*1e5)/1e5, Math.round(p[p.length-1].lon*1e5)/1e5]);
   }
 
+  const offMin = utcOffsetMin(rows);
+
   return {
     ver: SUMMARY_VER,
     date: t0.date, start: t0.timeStr, end: t1.timeStr,
+    startUtc: utcOf(t0, offMin), endUtc: utcOf(t1, offMin),
+    utcOff: offsetStr(offMin), utcOffMin: offMin,
     startTs: Date.parse(t0.date + "T" + t0.timeStr) || 0,
     dur: t1.sec - t0.sec,
     runSecs, engStart, engEnd, type, trackLL,
+    takeoff: type === "flight" ? detectTakeoff(rows) : null,
     dist,
     maxAlt: g("alt")?.max ?? null, maxIas: g("ias")?.max ?? null,
     maxRpm: g("rpm")?.max ?? null, maxOilT: g("oilT")?.max ?? null,
@@ -329,6 +507,7 @@ function fmtDateDE(iso){
 return {
   F2C, GAL2L, LIMITS, TYPE_META, SUMMARY_VER,
   parseG3X, zoneOf, stats, episodes, allEpisodes, computeTrack, summarize,
+  utcOffsetMin, utcOf, offsetStr, clockStr, detectTakeoff,
   fmtDur, fmtNum, fmtDist, fmtDateDE,
 };
 });

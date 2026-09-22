@@ -118,9 +118,10 @@ ul.flights li{display:flex;align-items:center;gap:10px;padding:5px 8px;border-to
 ul.flights li:first-child{border-top:0}
 ul.flights li:hover{background:var(--page)}
 .fl-type{flex:none;width:20px;text-align:center}
-.fl-when{flex:none;width:158px;white-space:nowrap}
+.fl-when{flex:none;width:196px;white-space:nowrap}
 .fl-when .d{font-weight:600}
 .fl-when .t{color:var(--muted)}
+.fl-when .z{color:var(--muted);font-size:11.5px}
 .fl-facts{flex:1;display:flex;flex-wrap:wrap;gap:2px 14px;color:var(--ink2);min-width:0;overflow:hidden}
 .fl-facts b{color:var(--ink)}
 .fl-badges{flex:none;display:flex;gap:5px}
@@ -307,6 +308,11 @@ button.btn.primary:hover{color:#fff;filter:brightness(1.05)}
       <h2>Übersicht</h2>
       <div class="tiles" id="tiles"></div>
     </div>
+    <div class="card" id="takeoffCard" style="display:none">
+      <h2 id="takeoffTitle">Start</h2>
+      <div class="tiles" id="takeoffTiles"></div>
+      <div class="zonenote" id="takeoffNote"></div>
+    </div>
     <div class="card">
       <h2>Grenzwert-Überschreitungen</h2>
       <div id="warnings"></div>
@@ -338,6 +344,14 @@ const drop = $("#drop"), fileInp = $("#file");
 
 /* ============ Einstellungen (Sprache + Einheiten) ============ */
 const cfg = { lang: "de", units: { temp:"C", press:"psi", map:"inHg", alt:"ft", speed:"kt", fuel:"lph" } };
+
+/* Langtexte, die an zwei Stellen gebraucht werden (Wörterbuch-Schlüssel und
+   Verwendung) — als Konstante, damit beide nie auseinanderlaufen. */
+const TAKEOFF_NOTE =
+  "Abheben = Zeitpunkt, an dem die Höhe die Platzhöhe verlässt (aus den ersten Steigflugsekunden zurückgerechnet). " +
+  "Die Strecke ist das Integral der GPS-Groundspeed über die Zeit, also die tatsächliche Strecke über Grund — " +
+  "inklusive Wind und Pistenneigung. Bei 1 Hz Aufzeichnung ist mit einigen Prozent Unsicherheit zu rechnen; " +
+  "als Startleistungsnachweis im Sinne des Flughandbuchs taugt der Wert nicht. Enthält ein Log mehrere Starts (Platzrunde, Touch&Go), wird der erste ausgewertet.";
 
 /* ---- Übersetzung: Schlüssel = deutscher Text ---- */
 const DICT = {
@@ -422,6 +436,20 @@ const DICT = {
   "Im Log leer": "Empty in the log", "Bewusst ausgelassen:": "Deliberately omitted:",
   "Öltemp.": "Oil temp.", "Groundspeed": "Groundspeed", "Drehzahl": "RPM",
   "Start": "Start", "Ende": "End",
+  "Startlauf": "Takeoff roll", "Startrollstrecke": "Ground roll",
+  "Startstrecke über 50 ft": "Takeoff distance over 50 ft",
+  "Dauer des Startlaufs": "Ground-roll time", "Abhebegeschwindigkeit": "Liftoff speed",
+  "Losrollen": "Start of roll", "Abheben": "Liftoff", "Platzhöhe": "Field elevation",
+  "Ø Startrollstrecke": "Avg. ground roll",
+  "Rollbeginn = letzter Messpunkt im Stand (Bremsen lösen).":
+    "Start of roll = last sample at a standstill (brake release).",
+  "Rollbeginn = Übergang auf Startleistung (das Flugzeug stand nie ganz still).":
+    "Start of roll = transition to takeoff power (the aircraft never came to a full stop).",
+  [TAKEOFF_NOTE]:
+    "Liftoff = the moment the altitude leaves field elevation (extrapolated back from the first seconds of climb). " +
+    "The distance is the integral of GPS groundspeed over time, i.e. the actual distance over the ground — " +
+    "wind and runway slope included. At 1 Hz logging expect an uncertainty of a few per cent; this is not a " +
+    "substitute for the takeoff performance figures in the aircraft flight manual. If a log contains several takeoffs (circuits, touch-and-go), the first one is evaluated.",
   "Keine CSV ausgewählt": "No CSV selected", "Bitte G3X-Logdateien (.csv) wählen.": "Please choose G3X log files (.csv).",
   "Upload fehlgeschlagen": "Upload failed", "Scan fehlgeschlagen": "Scan failed",
   "Flug konnte nicht geladen werden": "Could not load flight", "Löschen fehlgeschlagen": "Delete failed",
@@ -874,6 +902,11 @@ function renderOverview(){
     [T("Höchste Drehzahl"), nf(mx("maxRpm"), 0) + (mx("maxRpm")!=null?" rpm":"")],
     [T("Größte Höhe"), fmtV("alt", mx("maxAlt"), 0) + (mx("maxAlt")!=null?" "+unitOf("alt"):"")],
   ];
+  const rolls = S.map(x => x.takeoff?.distRoll).filter(v => v != null);
+  if (rolls.length)
+    tiles.push([T("Ø Startrollstrecke"),
+      `${fmtRunway(rolls.reduce((a,b) => a+b, 0) / rolls.length)} <span style="font-size:12px;color:var(--muted)">${
+        cfg.lang==="en" ? `from ${rolls.length} takeoffs` : `aus ${rolls.length} Starts`}</span>`]);
   $("#ovTiles").innerHTML = tiles.map(([n,v]) =>
     `<div class="tile"><div class="name">${n}</div><div class="val" style="font-size:18px">${v}</div></div>`).join("");
 
@@ -917,10 +950,12 @@ function renderOverview(){
       ? `<span>${T("nur Avionik, Motor lief nicht")}</span>`
       : `<span><b>${fmtDur(s.runSecs)}</b> ${T("Motor")}</span>` +
         (flightish ? `<span><b>${fmtDist(s.dist)}</b></span><span>max <b>${fmtV("alt",s.maxAlt,0)} ${unitOf("alt")}</b></span>` : "") +
+        (flightish && s.takeoff ? `<span>${T("Startlauf")} <b>${fmtRunway(s.takeoff.distRoll)}</b></span>` : "") +
         `<span>max <b>${nf(s.maxRpm,0)} rpm</b></span><span>${cfg.lang==="en"?"Oil":"Öl"} <b>${fmtV("oilT",s.maxOilT,1)} ${unitOf("oilT")}</b></span>`;
     li.innerHTML = `
       <span class="fl-type" title="${esc(typeLabel(flType(fl)))}">${tm.icon}</span>
-      <span class="fl-when"><span class="d">${esc(fmtDateL(s.date))}</span> <span class="t">${esc(s.start.slice(0,5))}</span></span>
+      <span class="fl-when"><span class="d">${esc(fmtDateL(s.date))}</span> <span class="t">${esc(s.start.slice(0,5))}</span>${
+        s.startUtc ? ` <span class="z" title="UTC">${esc(s.startUtc.slice(0,5))}Z</span>` : ""}</span>
       <span class="fl-facts">${facts}</span>
       <span class="fl-badges">${badges.join("")}</span>
       <button class="fl-x" title="${T("Diesen Log entfernen")}">✕</button>`;
@@ -1012,6 +1047,45 @@ const CURATED = [
   ["Navigation & Autopilot","Höhenrudertrimmung","",2,[["Elevator Trim","Trimmung","var(--s1)"]]],
 ];
 
+/* ---------- Start: Rollstrecke & Abheben ---------- */
+/* Strecken beim Start immer in Metern MIT Fuß daneben — Pistenlängen stehen in
+   der AIP je nach Land in der einen oder anderen Einheit. */
+const fmtRunway = m => m == null ? "–" : `${nf(Math.round(m), 0)} m`;
+const fmtRunwayFt = m => m == null ? "" : `${nf(Math.round(m / 0.3048), 0)} ft`;
+
+function renderTakeoff(tk){
+  const card = $("#takeoffCard");
+  if (!tk){ card.style.display = "none"; return; }
+  card.style.display = "";
+  $("#takeoffTitle").textContent = T("Startlauf");
+
+  const en = cfg.lang === "en";
+  const spdU = unitOf("ias");
+  const tiles = [
+    [T("Startrollstrecke"), fmtRunway(tk.distRoll), fmtRunwayFt(tk.distRoll), true],
+    [T("Startstrecke über 50 ft"), fmtRunway(tk.dist50), fmtRunwayFt(tk.dist50), false],
+    [T("Dauer des Startlaufs"), fmtDur(tk.dur),
+      `${en?"to 50 ft":"bis 50 ft"} ${fmtDur(tk.dur50)}`, false],
+    [T("Abhebegeschwindigkeit"),
+      tk.liftIas != null ? `${fmtV("ias", tk.liftIas, 0)} <span class="unit">${spdU} IAS</span>`
+                         : `${fmtV("gndSpd", tk.liftGs, 0)} <span class="unit">${spdU} GS</span>`,
+      tk.liftIas != null ? `GS ${fmtV("gndSpd", tk.liftGs, 0)} ${spdU}` : "", false],
+    [T("Losrollen"), tk.rollStr, tk.rollUtc ? `${tk.rollUtc} UTC` : "", false],
+    [T("Abheben"), tk.liftStr, tk.liftUtc ? `${tk.liftUtc} UTC` : "", false],
+    [T("Platzhöhe"), `${fmtV("alt", tk.field, 0)} <span class="unit">${unitOf("alt")}</span>`,
+      tk.oat != null ? `OAT ${fmtV("oat", tk.oat, 0)} ${unitOf("oat")}` : "", false],
+  ];
+  $("#takeoffTiles").innerHTML = tiles.map(([name, val, sub, hero]) =>
+    `<div class="tile"><div class="name">${esc(name)}</div>
+      <div class="val"${hero ? ' style="color:var(--s1)"' : ""}>${val}</div>
+      <div class="mm">${esc(sub)}</div></div>`).join("");
+
+  const how = tk.method === "brakerelease"
+    ? T("Rollbeginn = letzter Messpunkt im Stand (Bremsen lösen).")
+    : T("Rollbeginn = Übergang auf Startleistung (das Flugzeug stand nie ganz still).");
+  $("#takeoffNote").textContent = how + " " + T(TAKEOFF_NOTE);
+}
+
 /* ---------- Detailbericht ---------- */
 function renderDetail(flight){
   destroyMaps();
@@ -1064,11 +1138,16 @@ function renderDetail(flight){
 
   const t0 = rows[0], t1 = rows[rows.length-1];
   const en = cfg.lang === "en";
+  const offMin = utcOffsetMin(fullRows);
+  const utcSpan = offMin == null ? ""
+    : ` (${utcOf(t0, offMin)}–${utcOf(t1, offMin)} UTC)`;
   $("#meta").textContent =
-    `${info.aircraft_ident || "?"} · ${tm.icon} ${typeLabel(flType(flight))} · ${fmtDateL(t0.date)} · ${t0.timeStr}–${t1.timeStr} ${en?"local time":"Lokalzeit"}` +
+    `${info.aircraft_ident || "?"} · ${tm.icon} ${typeLabel(flType(flight))} · ${fmtDateL(t0.date)} · ${t0.timeStr}–${t1.timeStr} ${en?"local time":"Lokalzeit"}${utcSpan}` +
     (trimmed ? (en ? ` (trimmed to engine time ±1 min, full log ${fmtDur(s.dur)})` : ` (auf Motorlaufzeit ±1 min zugeschnitten, Log gesamt ${fmtDur(s.dur)})`) : ` (${fmtDur(t1.sec - t0.sec)})`) +
     ` · ${en?"engine time ≈":"Motorlaufzeit ca."} ${fmtDur(s.runSecs)} · ${en?"distance":"Strecke"} ${fmtDist(s.dist)}` +
     (info.engine_hours ? ` · ${en?"engine hours per G3X":"Motorstunden lt. G3X"}: ${info.engine_hours} h` : "");
+
+  renderTakeoff(detectTakeoff(fullRows));
 
   const allEps = allEpisodes(rows);
   const epWorst = {};
@@ -1292,8 +1371,8 @@ function renderDetail(flight){
   if (emptyNum.length || emptyCat.length)
     eh += `<div><b>${T("Im Log leer")}</b> ${en?"(sensor not installed or function inactive)":"(Sensor nicht verbaut oder Funktion nicht aktiv)"}: ${[...emptyNum, ...emptyCat].map(n => `<code>${esc(n)}</code>`).join(" ")}</div>`;
   eh += en
-    ? `<div style="margin-top:6px"><b>Deliberately omitted:</b> <code>UTC Time</code> <code>UTC Offset</code> (redundant with local time), <code>GPS Time of Week</code> (internal counter), <code>Latitude</code>/<code>Longitude</code> (shown on the track map), <code>Date</code>/<code>Time</code> (time axis of all charts).</div>`
-    : `<div style="margin-top:6px"><b>Bewusst ausgelassen:</b> <code>UTC Time</code> <code>UTC Offset</code> (redundant zur Lokalzeit), <code>GPS Time of Week</code> (interner Zähler), <code>Latitude</code>/<code>Longitude</code> (in der Flugweg-Karte enthalten), <code>Date</code>/<code>Time</code> (Zeitachse aller Diagramme).</div>`;
+    ? `<div style="margin-top:6px"><b>Deliberately omitted:</b> <code>UTC Time</code> <code>UTC Offset</code> (shown as UTC next to local time), <code>GPS Time of Week</code> (internal counter), <code>Latitude</code>/<code>Longitude</code> (shown on the track map), <code>Date</code>/<code>Time</code> (time axis of all charts).</div>`
+    : `<div style="margin-top:6px"><b>Bewusst ausgelassen:</b> <code>UTC Time</code> <code>UTC Offset</code> (wird als UTC-Zeit neben der Lokalzeit angezeigt), <code>GPS Time of Week</code> (interner Zähler), <code>Latitude</code>/<code>Longitude</code> (in der Flugweg-Karte enthalten), <code>Date</code>/<code>Time</code> (Zeitachse aller Diagramme).</div>`;
   $("#emptyCols").innerHTML = eh;
 
   runPendingInits();

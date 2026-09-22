@@ -7,7 +7,18 @@ limits, flight classification) lives in one shared module used unchanged.
 
 ## How it works
 - **`core/g3x-core.cjs`** — parser + Rotax-915-iS limits + flight classification
-  (✈️ flight / 🔧 ground run / 🔌 avionics-only). Pure, no DOM.
+  (✈️ flight / 🔧 ground run / 🔌 avionics-only) + UTC handling + takeoff
+  detection. Pure, no DOM.
+  - `detectTakeoff(rows)` finds the first takeoff in a log: the start of the roll
+    (last sample at a standstill, i.e. brake release — or the transition to
+    takeoff power for a rolling start) and the liftoff (the altitude leaving
+    field elevation, extrapolated back from the first seconds of climb so the
+    1 Hz sampling does not add a systematic ~10 % overshoot). The distance is the
+    time integral of GPS groundspeed, which is more robust than summing GPS
+    positions and more accurate than `time × liftoff speed`.
+  - `summarize()` stores `startUtc` / `endUtc` / `utcOff` and `takeoff` in the
+    per-log summary. **Bumping `SUMMARY_VER` re-summarizes stored logs**: the
+    folder scan re-reads files whose stored summary is older.
 - **`backend/`**
   - `server.mjs` — `createBackend({ dataDir, stateFile })`; the local HTTP API +
     static SPA.
@@ -26,8 +37,13 @@ limits, flight classification) lives in one shared module used unchanged.
 ```bash
 npm install
 npm start          # Electron dev
-npm test           # backend tests (scan / dedup / upload / delete / persistence)
+npm test           # SPA syntax check + backend tests (scan / dedup / upload /
+                   # delete / persistence / UTC / takeoff / re-summarize)
+npm run test:ui    # end-to-end UI smoke test in a hidden Electron window
 ```
+`test/takeoff-fixture.mjs` generates a synthetic G3X log with a takeoff whose
+ground roll is analytically known (`0.5·a·t²`), so the detection can be checked
+against an exact expected value in both languages.
 
 ## Build
 
@@ -50,10 +66,11 @@ open the first time via **right-click → Open** (Gatekeeper).
 
 ## Project layout
 ```
-core/g3x-core.cjs      parser + Rotax limits + classification
+core/g3x-core.cjs      parser + Rotax limits + classification + takeoff/UTC
 backend/               server.mjs, folder-scan.mjs, store-json.mjs, selftest.mjs
 app/                   frontend (index.html) + vendored Leaflet
 electron/              main.cjs, preload.cjs, settings.cjs, migrate.cjs
+test/                  sample.csv, takeoff-fixture.mjs, syntax-check.mjs, ui-smoke.cjs
 build/                 icon.ico (Windows), icon.png (macOS source)
 ```
 

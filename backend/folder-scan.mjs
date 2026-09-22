@@ -10,9 +10,14 @@ import path from "node:path";
 export function makeFolderScan({ store, core, getDataDir, quietMs = 2500, log = () => {} }) {
   let running = false, pending = false;
 
+  // Eine ältere Zusammenfassung kennt neue Felder (z. B. die Startstrecke) noch
+  // nicht — solche Einträge werden beim nächsten Scan neu berechnet, auch wenn
+  // sich die Datei selbst nicht geändert hat.
+  const stale = (rec) => !rec || (rec.summary?.ver || 0) !== core.SUMMARY_VER;
+
   async function scanOnce() {
     const dataDir = getDataDir();
-    const counts = { new: 0, dup: 0, error: 0, removed: 0, messages: [] };
+    const counts = { new: 0, dup: 0, error: 0, updated: 0, removed: 0, messages: [] };
     let entries = [];
     try { entries = await fs.readdir(dataDir, { withFileTypes: true }); }
     catch { return counts; }
@@ -30,8 +35,11 @@ export function makeFolderScan({ store, core, getDataDir, quietMs = 2500, log = 
       seenPaths.add(full);                       // vorhanden -> Index-Eintrag behalten
 
       const existing = store.getByPath(full);
-      if (existing && existing.mtimeMs === st.mtimeMs && existing.size === st.size) continue; // unverändert
-      if (Date.now() - st.mtimeMs < quietMs) continue;   // wird evtl. noch geschrieben
+      // Nur bereits indizierte Dateien dürfen die Ruhephase überspringen — sie
+      // liegen nachweislich vollständig vor und sollen nur neu ausgewertet werden.
+      const needsResummary = !!existing && stale(existing);
+      if (existing && !needsResummary && existing.mtimeMs === st.mtimeMs && existing.size === st.size) continue; // unverändert
+      if (!needsResummary && Date.now() - st.mtimeMs < quietMs) continue;   // wird evtl. noch geschrieben
 
       let buf;
       try { buf = await fs.readFile(full); } catch { continue; }
@@ -40,7 +48,8 @@ export function makeFolderScan({ store, core, getDataDir, quietMs = 2500, log = 
       // Gleicher Inhalt schon unter anderem Dateinamen indiziert -> Duplikat.
       const byHash = store.get(hash);
       if (byHash && byHash.sourcePath !== full) { counts.dup++; continue; }
-      if (byHash && byHash.sourcePath === full) {  // nur mtime/size aktualisieren
+      const resummarize = byHash && stale(byHash);
+      if (byHash && !resummarize) {                // nur mtime/size aktualisieren
         store.touch(hash, { sourcePath: full, mtimeMs: st.mtimeMs, size: st.size, name });
         continue;
       }
@@ -53,9 +62,10 @@ export function makeFolderScan({ store, core, getDataDir, quietMs = 2500, log = 
         continue;
       }
       store.add({ id: hash, hash, name, summary, sourcePath: full,
-                  mtimeMs: st.mtimeMs, size: st.size, typeOverride: existing?.typeOverride || null });
-      counts.new++;
-      log(`neu: ${name} [${summary.type}]`);
+                  mtimeMs: st.mtimeMs, size: st.size,
+                  typeOverride: (byHash || existing)?.typeOverride || null });
+      if (resummarize) { counts.updated++; log(`aktualisiert: ${name} [Zusammenfassung v${summary.ver}]`); }
+      else { counts.new++; log(`neu: ${name} [${summary.type}]`); }
     }
 
     counts.removed = store.retainPaths(seenPaths);   // gelöschte Dateien aus dem Index entfernen
@@ -69,6 +79,7 @@ export function makeFolderScan({ store, core, getDataDir, quietMs = 2500, log = 
       let c = await scanOnce();
       while (pending) { pending = false; const x = await scanOnce();
         c = { new: c.new + x.new, dup: c.dup + x.dup, error: c.error + x.error,
+              updated: c.updated + x.updated,
               removed: c.removed + x.removed, messages: [...c.messages, ...x.messages] }; }
       return c;
     } finally { running = false; }

@@ -12,7 +12,8 @@
     "dist": "electron-builder",
     "dist:win": "electron-builder --win nsis",
     "dist:mac": "electron-builder --mac dmg",
-    "test": "node backend/selftest.mjs"
+    "test": "node test/syntax-check.mjs app/index.html && node backend/selftest.mjs",
+    "test:ui": "electron test/ui-smoke.cjs"
   },
   "dependencies": {
     "@fastify/multipart": "^9.0.3",

@@ -3,7 +3,11 @@
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { createBackend } from "./server.mjs";
+import { makeTakeoffCsv, expectedRollMetres } from "../test/takeoff-fixture.mjs";
+
+const core = createRequire(import.meta.url)("../core/g3x-core.cjs");
 
 let fails = 0;
 const ok = (c, m) => { console.log(`${c ? "  OK " : "FAIL "} ${m}`); if (!c) fails++; };
@@ -86,6 +90,46 @@ await fs.writeFile(path.join(folderQ, "frisch.csv"), sample.toString("utf8").rep
 const c2 = await jq("/api/rescan", { method: "POST" });
 ok(c2.counts.new === 0, `frisch extern abgelegte Datei wartet Ruhephase ab (${JSON.stringify(c2.counts)})`);
 await beQ.close();
+
+// ---- UTC-Zeiten und Startstrecke ----
+const folderT = path.join(tmp, "Start");
+const stateT = path.join(tmp, "appdataT", "idx.json");
+await fs.mkdir(folderT, { recursive: true });
+const takeoffCsv = makeTakeoffCsv();
+await fs.writeFile(path.join(folderT, "start.csv"), takeoffCsv);
+const beT = await createBackend({ dataDir: folderT, stateFile: stateT, quietMs: 0, scanIntervalMs: 999999 });
+const jt = async (p, opt) => (await fetch(beT.url + p, opt)).json();
+const sT = (await jt("/api/flights")).flights[0].summary;
+
+ok(sT.startUtc === "09:35:00" && sT.endUtc && sT.utcOff === "+02:00",
+  `UTC-Zeiten in der Zusammenfassung (${sT.start} lokal = ${sT.startUtc} UTC, ${sT.utcOff})`);
+ok(sT.type === "flight", `synthetischer Log wird als Flug erkannt (${sT.type})`);
+const tk = sT.takeoff;
+const expM = expectedRollMetres();
+ok(!!tk, "Startlauf erkannt");
+ok(tk && Math.abs(tk.distRoll - expM) / expM < 0.05,
+  `Startrollstrecke ${tk ? tk.distRoll.toFixed(0) : "–"} m, erwartet ${expM.toFixed(0)} m (< 5 % Abweichung)`);
+ok(tk && tk.dist50 > tk.distRoll, "Strecke bis 50 ft ist länger als die Rollstrecke");
+ok(tk && tk.rollUtc === "09:35:40" && tk.liftStr > tk.rollStr,
+  `Losrollen ${tk ? tk.rollStr : "–"} lokal / ${tk ? tk.rollUtc : "–"} UTC, Abheben ${tk ? tk.liftStr : "–"}`);
+ok(tk && tk.liftGs >= 45 && tk.liftGs <= 55, `Abhebegeschwindigkeit ${tk ? tk.liftGs : "–"} kt`);
+
+// Ein Standlauf darf KEINE Startstrecke liefern (sonst wäre die Erkennung zu gierig)
+const groundSummary = core.summarize(core.parseG3X(sample.toString("utf8")));
+ok(groundSummary.takeoff == null, "Standlauf liefert keine Startstrecke");
+ok(groundSummary.startUtc === "09:35:01", `UTC auch im echten Beispiel-Log (${groundSummary.startUtc})`);
+
+// Veraltete Zusammenfassung wird beim Scan neu berechnet (ohne Dateiänderung)
+await beT.close();
+const idx = JSON.parse(await fs.readFile(stateT, "utf8"));
+const onlyId = Object.keys(idx.flights)[0];
+idx.flights[onlyId].summary = { ...idx.flights[onlyId].summary, ver: 1, takeoff: undefined, startUtc: "" };
+await fs.writeFile(stateT, JSON.stringify(idx));
+const beT2 = await createBackend({ dataDir: folderT, stateFile: stateT, quietMs: 0, scanIntervalMs: 999999 });
+const reS = (await (await fetch(beT2.url + "/api/flights")).json()).flights[0].summary;
+ok(reS.ver === core.SUMMARY_VER && reS.takeoff && reS.startUtc === "09:35:00",
+  `alte Zusammenfassung (v1) wurde automatisch neu berechnet (jetzt v${reS.ver})`);
+await beT2.close();
 
 await fs.rm(tmp, { recursive: true, force: true });
 console.log(fails ? `\n${fails} FEHLER` : "\nAlle Tests bestanden");
