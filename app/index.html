@@ -1369,7 +1369,18 @@ function renderDetail(flight){
     ` · ${en?"engine time ≈":"Motorlaufzeit ca."} ${fmtDur(s.runSecs)} · ${en?"distance":"Strecke"} ${fmtDist(s.dist)}` +
     (info.engine_hours ? ` · ${en?"engine hours per G3X":"Motorstunden lt. G3X"}: ${info.engine_hours} h` : "");
 
-  renderPhases(fullRows);
+  // Fehler hier dürfen den restlichen Bericht nicht mitreißen
+  try { renderPhases(fullRows); }
+  catch (err){
+    console.error("Start/Landung:", err);
+    $("#takeoffCard").style.display = "";
+    for (const id of ["#phaseTimes", "#takeoffTiles", "#landingTiles", "#takeoffChart", "#landingChart"]) $(id).innerHTML = "";
+    $("#takeoffPart").style.display = "none"; $("#landingPart").style.display = "none";
+    $("#takeoffNote").textContent = err instanceof ReferenceError
+        ? (en ? "Takeoff/landing: outdated program file in the cache — please reload (Ctrl+F5)."
+              : "Start/Landung: veraltete Programmdatei im Cache — bitte neu laden (Strg+F5).")
+        : (en ? "Takeoff/landing could not be analysed for this log (" : "Start/Landung konnte für diesen Log nicht ausgewertet werden (") + err.message + ").";
+  }
 
   const allEps = allEpisodes(rows);
   const epWorst = {};
@@ -1592,7 +1603,7 @@ function renderDetail(flight){
 
   // Nicht dargestellte Spalten
   const emptyNum = numCols.filter(c => !c.hasData).map(c => c.name);
-  const emptyCat = catCols.filter(c => c.n === 0).map(c => CAT_COLS[c.name] || c.name);
+  const emptyCat = catCols.filter(c => c.n === 0).map(c => c.label || c.name);
   let eh = "";
   if (emptyNum.length || emptyCat.length)
     eh += `<div><b>${T("Im Log leer")}</b> ${en?"(sensor not installed or function inactive)":"(Sensor nicht verbaut oder Funktion nicht aktiv)"}: ${[...emptyNum, ...emptyCat].map(n => `<code>${esc(n)}</code>`).join(" ")}</div>`;

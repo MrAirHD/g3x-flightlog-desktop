@@ -8,6 +8,7 @@ import { promises as fs, createReadStream } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 
 import { makeJsonStore } from "./store-json.mjs";
 import { makeFolderScan } from "./folder-scan.mjs";
@@ -111,10 +112,21 @@ export async function createBackend({ dataDir, stateFile, host = "127.0.0.1", po
   app.get("/api/status", async () => ({ archiveWritable: writable, dataDir }));
 
   // ---- Statik: SPA + geteilter Core + vendored Leaflet ----
-  await app.register(fstatic, { root: path.join(ROOT, "app"), prefix: "/", index: ["index.html"] });
+  // index.html bindet den Core mit Inhalts-Hash ein (?v=…), beide gehen als
+  // no-cache raus. Sonst liefert ein Browser- oder Proxy-Cache (z. B. Cloudflare)
+  // nach einem Update den ALTEN Core zur NEUEN Seite — der Bericht bleibt leer.
+  const coreFile = path.join(ROOT, "core", "g3x-core.cjs");
+  const coreVer = createHash("sha256").update(await fs.readFile(coreFile)).digest("hex").slice(0, 12);
+  const indexHtml = (await fs.readFile(path.join(ROOT, "app", "index.html"), "utf8"))
+    .replace('src="/g3x-core.js"', `src="/g3x-core.js?v=${coreVer}"`);
+  const sendIndex = async (_req, reply) =>
+    reply.header("cache-control", "no-cache").type("text/html; charset=utf-8").send(indexHtml);
+  app.get("/", sendIndex);
+  app.get("/index.html", sendIndex);
+  await app.register(fstatic, { root: path.join(ROOT, "app"), prefix: "/", index: false });
   app.get("/g3x-core.js", async (_req, reply) => {
-    reply.type("application/javascript");
-    return reply.send(createReadStream(path.join(ROOT, "core", "g3x-core.cjs")));
+    reply.type("application/javascript").header("cache-control", "no-cache");
+    return reply.send(createReadStream(coreFile));
   });
 
   await scanner.scan();
