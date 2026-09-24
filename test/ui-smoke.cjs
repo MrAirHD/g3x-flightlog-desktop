@@ -45,6 +45,12 @@ app.whenReady().then(async () => {
       takeoffShown: q("#takeoffCard") ? q("#takeoffCard").style.display !== "none" : false,
       takeoffTiles: q("#takeoffTiles") ? q("#takeoffTiles").textContent : "",
       takeoffNote: q("#takeoffNote") ? q("#takeoffNote").textContent : "",
+      phaseTimes: q("#phaseTimes") ? q("#phaseTimes").textContent : "",
+      landingTiles: q("#landingTiles") ? q("#landingTiles").textContent : "",
+      takeoffH: q("#takeoffH") ? q("#takeoffH").textContent : "",
+      landingH: q("#landingH") ? q("#landingH").textContent : "",
+      charts: [...document.querySelectorAll("#takeoffChart svg, #landingChart svg")].length,
+      chartText: [...document.querySelectorAll("#takeoffChart, #landingChart")].map(e => e.textContent).join(" "),
     };
   })()`);
 
@@ -64,6 +70,8 @@ app.whenReady().then(async () => {
   ok(/Startlauf<\/span>|Startlauf /.test(v.listHtml.replace(/<b>/g, "")) || v.listHtml.includes("Startlauf"),
     "Startrollstrecke steht als Fakt in der Zeitleiste");
   ok(/Ø Startrollstrecke/.test(v.ovTiles), "Übersichtskachel „Ø Startrollstrecke“ vorhanden");
+  ok(v.listHtml.includes("09:35Z") && v.listHtml.includes("09:45Z") && v.listHtml.includes("🛬"),
+    "Start- und Landezeit (UTC) stehen in der Zeitleiste");
 
   // ---- Detailbericht öffnen ----
   await win.webContents.executeJavaScript(`document.querySelector("#flightList li").click()`);
@@ -73,7 +81,17 @@ app.whenReady().then(async () => {
   ok(/UTC/.test(v.meta) && /09:35:00/.test(v.meta), `Kopfzeile zeigt UTC: ${v.meta.slice(0, 160)}`);
   const tiles = v.takeoffTiles.replace(/\s+/g, " ");
   ok(/Startrollstrecke ?2\d\d m/.test(tiles), `Startrollstrecke in der Karte: ${tiles.slice(0, 90)}`);
-  ok(tiles.includes("09:35:40 UTC"), "Losrollen mit UTC-Zeit");
+  ok(tiles.includes("09:35:39 UTC"), "Losrollen mit UTC-Zeit");
+  const times = v.phaseTimes.replace(/\s+/g, " ");
+  ok(/Startzeit \(Abheben\) ?09:35:57 UTC ?11:35:57 lokal/.test(times), `Startzeit in UTC: ${times.slice(0, 80)}`);
+  ok(/Landezeit \(Aufsetzen\) ?09:45:57 UTC ?11:45:57 lokal/.test(times), "Landezeit in UTC");
+  ok(/Flugzeit ?10 min/.test(times), "Flugzeit Abheben–Aufsetzen");
+  const ltiles = v.landingTiles.replace(/\s+/g, " ");
+  ok(/Landerollstrecke ?2\d\d m/.test(ltiles) && /Aufsetzgeschwindigkeit ?\d+ kt IAS/.test(ltiles),
+    `Landekacheln: ${ltiles.slice(0, 120)}`);
+  ok(!/undefined|NaN|–\s*m/.test(ltiles + times), "keine leeren Werte in den Landekacheln");
+  ok(v.charts === 2 && /Abheben · 2\d\d m/.test(v.chartText) && /Aufsetzen · \d+ m/.test(v.chartText),
+    `Start- und Landeverlauf als Diagramm (${v.charts} Diagramme)`);
   ok(/Abhebegeschwindigkeit ?\d+ kt IAS/.test(tiles), "Abhebegeschwindigkeit als IAS");
   ok(!/undefined|NaN|–\s*m/.test(tiles), `keine leeren Werte in den Kacheln (${tiles.slice(0, 200)})`);
   ok(v.takeoffNote.length > 80, "Erläuterung unter der Karte vorhanden");
@@ -87,8 +105,10 @@ app.whenReady().then(async () => {
   v = await waitFor(x => x.takeoffShown);
   const en = v.takeoffTiles.replace(/\s+/g, " ");
   ok(/Ground roll ?2\d\d m/.test(en), `englische Kachelbeschriftung: ${en.slice(0, 80)}`);
-  ok(!/Startrollstrecke|Abheben|Platzhöhe|Losrollen/.test(en + v.takeoffNote),
-    "keine deutschen Resttexte in der englischen Startlauf-Karte");
+  const enAll = en + v.takeoffNote + v.phaseTimes + v.landingTiles + v.takeoffH + v.landingH + v.chartText;
+  ok(!/Startrollstrecke|Abheben|Platzhöhe|Losrollen|Landung|Aufsetzen|Flugzeit|lokal|Höhe|Strecke|bis 10|ab 50/.test(enAll),
+    "keine deutschen Resttexte in der englischen Start-/Landekarte" + ((enAll.match(/Startrollstrecke|Abheben|Platzhöhe|Losrollen|Landung|Aufsetzen|Flugzeit|lokal|Höhe|Strecke|bis 10|ab 50/g) || []).length ? ": " + enAll.match(/.{0,40}(Startrollstrecke|Abheben|Platzhöhe|Losrollen|Landung|Aufsetzen|Flugzeit|lokal|Höhe|Strecke|bis 10|ab 50).{0,40}/g).join(" | ") : ""));
+  ok(/Takeoff time \(liftoff\)/.test(v.phaseTimes) && /Landing roll/.test(v.landingTiles), "englische Start-/Landezeiten");
   ok(/Liftoff/.test(v.takeoffNote), "Erläuterung ist übersetzt");
 
   ok(errors.length === 0, `keine JS-Fehler in der Konsole${errors.length ? ": " + errors.join(" | ") : ""}`);

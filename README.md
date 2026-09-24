@@ -45,11 +45,13 @@ the releases page too.
 - 🚦 **Traffic-light checks** against the Rotax limits — green / yellow / red for
   RPM, oil & coolant temperature, oil & fuel pressure, EGT, and more, with the
   exact time and peak of every exceedance.
-- 🛫 **Takeoff figures** — for every flight: ground roll and distance over a
-  50 ft obstacle, how long the roll took, and your liftoff speed. Measured from
-  the log: brake release to the moment the wheels leave the ground.
+- 🛫🛬 **Takeoff & landing figures** — for every flight: takeoff and landing
+  time in UTC (for your logbook) and the flight time in between; ground roll and
+  distance over a 50 ft obstacle, liftoff speed; landing roll, landing distance
+  from 50 ft, touchdown and approach speed. Each phase also gets its own chart
+  (speed and height over the distance along the runway).
 - 🕐 **UTC alongside local time** — start and end of every log, and the takeoff
-  times, in both.
+  and landing times, in both.
 - 🗺️ **Map of every flight** (OpenStreetMap) — hover the track to see height,
   speed, RPM, fuel flow and temperatures for that exact second.
 - 📊 **Clear charts** for the whole flight, plus every value the G3X records.
@@ -81,7 +83,7 @@ file is removed from the folder. Simple and predictable.
 - **Private by design.** Everything runs on your PC. Nothing is uploaded. The
   only thing fetched from the internet is the background map imagery — and if
   you're offline, the map simply draws the track as an outline instead.
-- **Takeoff distances are an analysis, not a performance figure.** They are
+- **Takeoff and landing distances are an analysis, not a performance figure.** They are
   computed from the recorded GPS groundspeed, so they are the real distance over
   the ground including wind and runway slope. The G3X records once per second,
   so expect an uncertainty of a few per cent. Use your aircraft flight manual for

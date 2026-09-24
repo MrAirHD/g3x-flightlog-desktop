@@ -17,11 +17,11 @@ const GAL2L = 3.785411784;
 
 const LIMITS = {
   rpm:     { label:"Drehzahl", unit:"rpm", dec:0,
-             zones:[[0,1800,"cold"],[1800,5500,"good"],[5500,5800,"warn"],[5800,1e9,"crit"]],
-             note:"max. 5800 rpm (höchstens 5 min), Dauerleistung 5500 rpm, Leerlauf min. 1800 rpm" },
+             zones:[[0,1800,"cold"],[1800,5500,"good"],[5500,5800,"warn"],[5800,1e9,"crit"]], allowS:300,
+             note:"max. 5800 rpm (höchstens 5 min), Dauerleistung 5500 rpm, Leerlauf min. 1800 rpm — 5500–5800 rpm (Startleistung) wird erst nach 5 min gemeldet" },
   map:     { label:"Ladedruck", unit:"inHg", dec:1,
-             zones:[[0,45,"good"],[45,51,"warn"],[51,1e9,"crit"]],
-             note:"max. 51 inHg (1730 hPa); Sollwert Start ca. 44,9 inHg (1520 hPa) — Vorwarnbereich abgeleitet" },
+             zones:[[0,45,"good"],[45,51,"warn"],[51,1e9,"crit"]], allowS:300,
+             note:"max. 51 inHg (1730 hPa); Sollwert Start ca. 44,9 inHg (1520 hPa) — Vorwarnbereich abgeleitet, wird wie die Startleistung erst nach 5 min gemeldet" },
   oilT:    { label:"Öltemperatur", unit:"°C", dec:1,
              zones:[[-999,50,"cold"],[50,110,"good"],[110,130,"warn"],[130,1e9,"crit"]],
              note:"Betrieb 50–130 °C, empfohlen 90–110 °C; Start erst ab 50 °C" },
@@ -72,6 +72,11 @@ const SKIP_COLS = new Set([
   "Date (yyyy-mm-dd)","Time (hh:mm:ss)","UTC Time (hh:mm:ss)","UTC Offset (hh:mm)",
   "GPS Time of Week (sec)",
 ]);
+/* Spalten, die als normale Messwerte-Spalte bleiben, für die Start-/Lande-
+   erkennung aber zusätzlich unter einem festen Namen an jeder Zeile hängen. */
+const ALIAS_COLS = {
+  "Vertical Speed (ft/min)":"vs", "GPS Velocity U (m/sec)":"gpsVU",
+};
 const CAT_COLS = {
   "GPS Fix Status":"GPS-Fix", "Active Nav Source":"Nav-Quelle", "Nav Annunciation":"Nav-Anzeige",
   "Nav Identifier":"Nav-Kennung", "Horizontal CDI Scale":"CDI-Skala",
@@ -147,6 +152,7 @@ function parseG3X(text){
       } else if (col.kind === "num"){
         const v = num(c[col.idx]);
         r[col.key] = v;
+        if (ALIAS_COLS[col.name]) r[ALIAS_COLS[col.name]] = v;
         if (v != null){ col.hasData = true;
           if (v < col.min) col.min = v;
           if (v > col.max) col.max = v; }
@@ -193,29 +199,46 @@ function stats(rows, key, L){
   return n ? { min, max, avg: sum/n, n, worst } : null;
 }
 
-function episodes(rows, key, minDur = 3){
+/* Grenzwert-Episoden. Eine Episode = Zeit außerhalb des grünen Bereichs;
+   Unterbrechungen bis 30 s werden zusammengefasst — ein Wert, der um eine
+   Grenze pendelt, ergibt EINEN Eintrag statt dreißig. Gemeldet wird nur, was
+     - mindestens 3 s im roten Bereich lag (rot), oder
+     - mindestens 10 s außerhalb Grün lag (gelb) und, bei zeitlich begrenzt
+       zulässigen Bereichen (allowS: Startleistung max. 5 min), länger dauerte.
+   Öldruck 11,6–29 psi ist unter 3500 rpm (Leerlauf, Rollen) normal. */
+const MERGE_S = 30, MIN_CRIT_S = 3, MIN_WARN_S = 10;
+function episodes(rows, key){
   const L = LIMITS[key];
   if (!L || !L.zones) return [];
+  const good = L.zones.find(z => z[2] === "good");
+  const mid = good ? (Math.max(good[0], -1e6) + Math.min(good[1], 1e6)) / 2 : 0;
   const out = [];
-  let cur = null;
+  let cur = null, prevBad = false;
   const flush = () => {
-    if (cur && cur.end - cur.start + 1 >= minDur) out.push(cur);
+    if (!cur) return;
+    const span = cur.end - cur.start + 1;
+    const sev = cur.secsCrit >= MIN_CRIT_S ? "crit"
+              : cur.secs >= MIN_WARN_S && !(L.allowS && span <= L.allowS) ? "warn" : null;
+    if (sev) out.push({ key, sev, start:cur.start, end:cur.end, startStr:cur.startStr, endStr:cur.endStr,
+                        peak:cur.peak, secs: sev === "crit" ? cur.secsCrit : cur.secs, n:cur.n });
     cur = null;
   };
   for (const r of rows){
     const v = r[key];
     const running = r.rpm != null && r.rpm > 400;
-    const z = running ? zoneOf(key, v) : null;
-    if (z === "warn" || z === "crit" || (z === "cold" && key === "oilT" && r.ias != null && r.ias > 40)){
-      const sev = z === "crit" ? "crit" : "warn";
-      if (cur && cur.sev === sev && r.sec - cur.end <= 3){
-        cur.end = r.sec; cur.endStr = r.timeStr;
-        if (sev === "crit" ? v > cur.peak : Math.abs(v) > Math.abs(cur.peak)) cur.peak = v;
-      } else {
-        flush();
-        cur = { key, sev, start:r.sec, end:r.sec, startStr:r.timeStr, endStr:r.timeStr, peak:v, zone:z };
-      }
-    } else flush();
+    let z = running ? zoneOf(key, v) : null;
+    if (key === "oilP" && z === "warn" && v < mid && r.rpm < 3500) z = null;
+    const bad = z === "warn" || z === "crit" || (z === "cold" && key === "oilT" && r.ias != null && r.ias > 40);
+    if (!bad){ prevBad = false; continue; }
+    if (cur && r.sec - cur.end > MERGE_S) flush();
+    if (!cur) cur = { start:r.sec, startStr:r.timeStr, end:r.sec, endStr:r.timeStr,
+                      secs:0, secsCrit:0, n:0, peak:v, low: v < mid };
+    if (!prevBad) cur.n++;
+    cur.secs++;
+    if (z === "crit") cur.secsCrit++;
+    cur.end = r.sec; cur.endStr = r.timeStr;
+    if (cur.low ? v < cur.peak : v > cur.peak) cur.peak = v;
+    prevBad = true;
   }
   flush();
   return out;
@@ -282,104 +305,174 @@ function utcOf(row, offMin){
   return clockStr(hms(row.timeStr) - offMin*60);
 }
 
-/* ---------- Startlauf (Startstrecke) ----------
-   Ermittelt den ERSTEN Start im Log: Beginn des Startlaufs (Losrollen mit
-   Startleistung) bis zum Abheben, dazu die Strecke über Grund. Enthält ein Log
-   mehrere Starts (Platzrunden, Touch&Go), wird nur der erste ausgewertet.
+/* ---------- Start und Landung ----------
+   Start: der ERSTE Start im Log — Beginn des Startlaufs (Bremsen lösen bzw.
+   Beginn der Beschleunigung bei rollendem Start) bis zum Abheben.
+   Landung: die LETZTE Landung im Log — Aufsetzen bis Ausrollen auf
+   Rollgeschwindigkeit. Dazwischen liegende Platzrunden/Touch&Go zählen nicht.
 
    Strecke = Integral der GPS-Groundspeed über die Zeit (Trapezregel). Das ist
-   genauer als „Zeit × Abhebegeschwindigkeit“ (die Beschleunigung ist nicht
-   linear) und robuster als das Aufsummieren der GPS-Positionen (Zittern).
-   Ergebnis ist die Strecke ÜBER GRUND — also inklusive Wind- und
-   Hangneigungseinfluss, genau wie eine am Platz gemessene Startrollstrecke. */
-function integrateGs(rows, from, tEnd){
+   genauer als „Zeit × Geschwindigkeit“ (die Beschleunigung ist nicht linear)
+   und robuster als das Aufsummieren der GPS-Positionen (Zittern). Ergebnis ist
+   die Strecke ÜBER GRUND — also inklusive Wind- und Pistenneigungseinfluss,
+   genau wie eine am Platz gemessene Roll-/Landestrecke.
+
+   Abheben/Aufsetzen werden an der Steig-/Sinkrate erkannt (ADAHRS „Vertical
+   Speed“ und GPS-Vertikalgeschwindigkeit, Mittel aus beiden), nicht allein an
+   der Baro-Höhe: die zeigt am Boden ±5 ft Rauschen und springt während des
+   Startlaufs durch den Staudruckfehler am statischen Anschluss. */
+const KT2MS = 0.514444;
+const AIR_KT = 45, HOLD_S = 20, WIN_S = 180;
+const TAXI_KT = 10;                       // Ende des Ausrollens
+const altOf = r => r.alt ?? r.gpsAlt ?? null;
+const median = a => { const s = [...a].sort((x,y) => x-y); return s.length ? s[s.length >> 1] : null; };
+
+/* Wert einer Spalte zur (Bruch-)Sekunde t, linear zwischen zwei Messpunkten. */
+function valAt(rows, t, key){
+  let a = 0, b = rows.length - 1;
+  if (t <= rows[a].sec) return rows[a][key] ?? null;
+  if (t >= rows[b].sec) return rows[b][key] ?? null;
+  while (b - a > 1){ const m = (a+b) >> 1; (rows[m].sec <= t) ? a = m : b = m; }
+  const va = rows[a][key], vb = rows[b][key];
+  if (va == null || vb == null) return va ?? vb ?? null;
+  const f = (t - rows[a].sec) / Math.max(1e-9, rows[b].sec - rows[a].sec);
+  return va + (vb - va) * f;
+}
+/* Strecke über Grund zwischen den Zeitpunkten tA und tB (Meter). */
+function integrateGs(rows, tA, tB){
   let m = 0;
-  for (let i = from + 1; i < rows.length; i++){
+  for (let i = 1; i < rows.length; i++){
     const t0 = rows[i-1].sec, t1 = rows[i].sec;
-    if (t0 >= tEnd) break;
+    if (t1 <= tA) continue;
+    if (t0 >= tB) break;
     const dt = t1 - t0;
     if (dt <= 0 || dt > 5) continue;            // Lücke im Log -> nicht raten
     const v0 = rows[i-1].gndSpd, v1 = rows[i].gndSpd;
     if (v0 == null || v1 == null) continue;
-    const f = Math.min(1, (tEnd - t0) / dt);    // letztes Stück nur anteilig
-    m += (v0 + (v0 + (v1 - v0) * f)) / 2 * 0.514444 * (dt * f);   // kt -> m/s
+    const a = Math.max(t0, tA), b = Math.min(t1, tB);
+    const va = v0 + (v1 - v0) * (a - t0) / dt, vb = v0 + (v1 - v0) * (b - t0) / dt;
+    m += (va + vb) / 2 * KT2MS * (b - a);
   }
   return m;
 }
-/* Zeitpunkt, zu dem die Höhe `target` durchstoßen wird — nicht auf die volle
-   Sekunde gerundet, sondern aus den ersten Steigflug-Sekunden extrapoliert.
-   Bei 1 Hz und ~700 ft/min Steigrate liegt der erste Messpunkt über der
-   Schwelle sonst bis zu eine Sekunde zu spät, was die Strecke um gut 10 %
-   zu lang macht. */
-function crossingTime(rows, idx, target, altOf){
+/* Steig-/Sinkrate in ft/min: Mittel aus ADAHRS-Vario und GPS-Vertikal-
+   geschwindigkeit; fehlen beide, aus der Höhenänderung gerechnet — über die
+   3 s davor (side = -1, Abheben) bzw. 6 s danach (side = +1, Aufsetzen), damit
+   der Knick nicht in die Nachbarsekunden verschmiert. Nach dem Aufsetzen ist
+   das Fenster länger, weil dort nur das Rauschen der Baro-Höhe am Boden stört. */
+function vsOf(rows, i, side){
+  const r = rows[i];
+  let s = 0, k = 0;
+  if (r.vs != null){ s += r.vs; k++; }
+  if (r.gpsVU != null){ s += r.gpsVU * 196.8504; k++; }
+  if (k) return s / k;
+  // Ausgleichsgerade — für eine Differenz zweier Punkte rauscht die Baro-Höhe zu stark
+  let n = 0, sx = 0, sy = 0, sxx = 0, sxy = 0;
+  const j0 = side > 0 ? i : Math.max(0, i-3), j1 = side > 0 ? Math.min(rows.length-1, i+6) : i;
+  for (let j = j0; j <= j1; j++){
+    const h = altOf(rows[j]);
+    if (h == null) continue;
+    const x = rows[j].sec - r.sec;
+    n++; sx += x; sy += h; sxx += x*x; sxy += x*h;
+  }
+  const den = n * sxx - sx * sx;
+  return n >= 3 && den > 0 ? (n * sxy - sx * sy) / den * 60 : null;
+}
+/* Zeitpunkt, zu dem die Höhe `target` durchstoßen wird — aus einer Geraden
+   durch die ersten Steigflug- (dir = +1, ab idx) bzw. letzten Sinkflug-
+   Sekunden (dir = -1, bis idx-1) gerechnet statt auf die volle Sekunde
+   gerundet. Das Ergebnis bleibt im Intervall [idx-1, idx]. */
+function crossingTime(rows, idx, target, dir){
   const pts = [];
-  for (let i = idx; i < rows.length && i <= idx + 6; i++){
+  const from = dir > 0 ? idx : Math.max(0, idx - 7), to = dir > 0 ? Math.min(rows.length-1, idx + 6) : idx - 1;
+  for (let i = from; i <= to; i++){
     const a = altOf(rows[i]);
     if (a != null) pts.push([rows[i].sec, a]);
   }
-  if (pts.length < 2) return rows[idx].sec;
+  const lo = rows[Math.max(0, idx-1)].sec, hi = rows[idx].sec;
+  if (pts.length < 2) return hi;
   const t0 = pts[0][0];
   let sx = 0, sy = 0, sxx = 0, sxy = 0;
   for (const [t, a] of pts){ const x = t - t0; sx += x; sy += a; sxx += x*x; sxy += x*a; }
   const den = pts.length * sxx - sx * sx;
-  if (den === 0) return rows[idx].sec;
+  if (den === 0) return hi;
   const slope = (pts.length * sxy - sx * sy) / den;      // ft/s
   const icept = (sy - slope * sx) / pts.length;
-  if (slope <= 0.5) return rows[idx].sec;                // kein plausibler Steigflug
-  const t = t0 + (target - icept) / slope;
-  // höchstens bis zum vorigen Messpunkt zurück — Ausreißer nicht durchreichen
-  return Math.min(rows[idx].sec, Math.max(rows[Math.max(0, idx-1)].sec, t));
+  if (dir * slope <= 0.5) return hi;                     // kein plausibler Steig-/Sinkflug
+  return Math.min(hi, Math.max(lo, t0 + (target - icept) / slope));
 }
+/* Erste (dir = +1) bzw. letzte (dir = -1) anhaltende Flugphase:
+   Groundspeed > 45 kt, und in den 20 s danach (davor) nie unter 30 kt. */
+function sustainedAir(rows, dir){
+  const n = rows.length;
+  for (let i = dir > 0 ? 0 : n - 1; i >= 0 && i < n; i += dir){
+    if ((rows[i].gndSpd ?? 0) <= AIR_KT) continue;
+    const tEnd = rows[i].sec + dir * HOLD_S;
+    let j = i, ok = true;
+    for (; j >= 0 && j < n && dir * (tEnd - rows[j].sec) >= 0; j += dir)
+      if ((rows[j].gndSpd ?? 0) <= 30){ ok = false; break; }
+    const edge = rows[Math.min(n-1, Math.max(0, j))];
+    if (ok && dir * (edge.sec - tEnd) >= 0) return i;
+    i = j;
+  }
+  return -1;
+}
+/* Platzhöhe = Median der Höhe, solange das Flugzeug sicher rollt (unter
+   30 kt Groundspeed und — falls geloggt — unter 38 kt IAS). */
+function fieldElev(rows, a, b){
+  const alts = [];
+  for (let i = Math.max(0, a); i <= Math.min(rows.length-1, b); i++){
+    const r = rows[i], h = altOf(r);
+    if (h == null || r.gndSpd == null || r.gndSpd >= 30) continue;
+    if (r.ias != null && r.ias >= 38) continue;
+    alts.push(h);
+  }
+  return alts.length >= 3 ? median(alts) : null;
+}
+/* Uhrzeit (lokal + UTC) eines Bruch-Zeitpunkts. */
+function clockAt(t, offMin){
+  return { str: clockStr(t), utc: offMin == null ? "" : clockStr(t - offMin*60) };
+}
+
 function detectTakeoff(rows){
   const n = rows.length;
   if (n < 20) return null;
+  const gs = i => rows[i].gndSpd ?? 0;
 
-  // 1) Erste anhaltende Flugphase: Groundspeed > 45 kt für mindestens 20 s.
-  const AIR_KT = 45, HOLD_S = 20;
-  let air = -1;
-  for (let i = 0; i < n; i++){
-    if ((rows[i].gndSpd ?? 0) <= AIR_KT) continue;
-    const tEnd = rows[i].sec + HOLD_S;
-    let j = i, ok = true;
-    for (; j < n && rows[j].sec <= tEnd; j++) if ((rows[j].gndSpd ?? 0) <= 30){ ok = false; break; }
-    if (ok && rows[Math.min(j, n-1)].sec >= tEnd){ air = i; break; }
-    i = j;
-  }
+  // 1) Erste anhaltende Flugphase.
+  const air = sustainedAir(rows, +1);
   if (air < 0) return null;
 
-  // 2) Rollbeginn: letzter Messpunkt vor dem Start, an dem das Flugzeug noch
-  //    steht (Bremsen lösen). Bei fliegendem Start (nie < 3 kt) ersatzweise der
-  //    Moment, in dem die Drehzahl Richtung Startleistung geht.
-  const WIN_S = 180;
-  let roll = -1;
-  for (let i = air; i >= 0 && rows[air].sec - rows[i].sec <= WIN_S; i--)
-    if ((rows[i].gndSpd ?? 0) < 3){ roll = i; break; }
-  let method = "brakerelease";
-  if (roll < 0){
-    let rpmMax = 0;
-    for (let i = air; i >= 0 && rows[air].sec - rows[i].sec <= WIN_S; i--)
-      rpmMax = Math.max(rpmMax, rows[i].rpm ?? 0);
-    if (rpmMax <= 0) return null;
-    for (let i = air; i >= 0 && rows[air].sec - rows[i].sec <= WIN_S; i--)
-      if ((rows[i].rpm ?? 0) < 0.75 * rpmMax){ roll = i; break; }
-    method = "power";
+  // 2) Rollbeginn: vom letzten Punkt unter 12 kt aus so weit zurück, wie die
+  //    Geschwindigkeit noch abnimmt (= Beschleunigungsphase). Endet das im
+  //    Stand, ist das „Bremsen lösen“; sonst ein rollender Start (Beginn der
+  //    Beschleunigung). Rollen/Backtrack davor zählt so nicht mit.
+  let k = air;
+  while (k > 0 && gs(k) > 12 && rows[air].sec - rows[k].sec <= 90) k--;
+  if (gs(k) > 12) return null;
+  let roll = k;
+  while (roll > 0 && rows[roll].sec - rows[roll-1].sec <= 5){
+    const cur = gs(roll);
+    if (gs(roll-1) < cur - 0.3 || (roll > 1 && gs(roll-2) < cur - 0.6)) roll--;
+    else break;
   }
-  if (roll < 0 || roll >= n - 2) return null;
+  const method = gs(roll) < 3 ? "brakerelease" : "rolling";
+  if (roll >= n - 2) return null;
 
-  // 3) Platzhöhe = Median der Höhe in den 10 s vor dem Losrollen.
-  const altOf = r => r.alt ?? r.gpsAlt ?? null;
-  const base = [];
-  for (let i = roll; i >= 0 && rows[roll].sec - rows[i].sec <= 10; i--){
-    const a = altOf(rows[i]);
-    if (a != null) base.push(a);
+  // 3) Platzhöhe aus dem Startlauf selbst (dort, wo sicher noch gerollt wird),
+  //    ersatzweise aus den 10 s vor dem Losrollen.
+  let field = fieldElev(rows, roll, air);
+  if (field == null){
+    let a = roll;
+    while (a > 0 && rows[roll].sec - rows[a-1].sec <= 10) a--;
+    const alts = [];
+    for (let i = a; i <= roll; i++){ const h = altOf(rows[i]); if (h != null) alts.push(h); }
+    field = median(alts);
   }
-  if (!base.length) return null;
-  base.sort((a,b) => a-b);
-  const field = base[base.length >> 1];
+  if (field == null) return null;
 
-  // 4) Abheben: erster Punkt, ab dem die Höhe dauerhaft steigt. Zuerst den
-  //    eindeutigen Steigflug (+50 ft) suchen, dann bis +10 ft zurückgehen —
-  //    so stört das Rauschen der Baro-Höhe am Boden (±5 ft) nicht.
+  // 4) Abheben: eindeutigen Steigflug (+50 ft über Platz) suchen, dann zurück,
+  //    solange noch gestiegen wird (Steigrate ≥ 100 ft/min).
   let climb = -1;
   for (let i = roll + 1; i < n && rows[i].sec - rows[roll].sec <= WIN_S; i++){
     const a = altOf(rows[i]);
@@ -388,38 +481,110 @@ function detectTakeoff(rows){
   if (climb < 0) return null;
   let lift = climb;
   while (lift > roll + 1){
-    const a = altOf(rows[lift-1]);
-    if (a == null || a - field > 10) lift--; else break;
+    const v = vsOf(rows, lift - 1, -1);
+    if (v != null && v >= 100) lift--; else break;
   }
 
-  const liftT   = crossingTime(rows, lift, field, altOf);
-  const climbT  = Math.max(liftT, crossingTime(rows, climb, field + 50, altOf));
-  const dur     = liftT - rows[roll].sec;
-  const liftGs  = rows[lift].gndSpd;
+  const rollT  = rows[roll].sec;
+  const liftT  = crossingTime(rows, lift, field, +1);
+  const climbT = Math.max(liftT, crossingTime(rows, climb, field + 50, +1));
+  const dur    = liftT - rollT;
+  const liftGs = valAt(rows, liftT, "gndSpd");
   if (dur < 3 || dur > 120) return null;          // unplausibel -> lieber nichts zeigen
   if (liftGs == null || liftGs < 20) return null;
 
-  const distRoll = integrateGs(rows, roll, liftT);
-  const dist50   = integrateGs(rows, roll, climbT);
+  const distRoll = integrateGs(rows, rollT, liftT);
+  const dist50   = integrateGs(rows, rollT, climbT);
   if (!(distRoll > 30)) return null;
 
   const offMin = utcOffsetMin(rows);
+  const cR = clockAt(rollT, offMin), cL = clockAt(liftT, offMin), c50 = clockAt(climbT, offMin);
   return {
-    rollSec: rows[roll].sec, rollStr: rows[roll].timeStr, rollUtc: utcOf(rows[roll], offMin),
-    liftSec: rows[lift].sec, liftStr: rows[lift].timeStr, liftUtc: utcOf(rows[lift], offMin),
-    dur, dur50: climbT - rows[roll].sec,
+    rollSec: rollT, rollStr: cR.str, rollUtc: utcOf(rows[roll], offMin) || cR.utc,
+    liftSec: liftT, liftStr: cL.str, liftUtc: cL.utc,
+    sec50: climbT, str50: c50.str, utc50: c50.utc,
+    dur, dur50: climbT - rollT,
     distRoll, dist50,
-    liftGs, liftIas: rows[lift].ias ?? null,
+    liftGs, liftIas: valAt(rows, liftT, "ias"),
     liftRpm: rows[lift].rpm ?? null, liftMap: rows[lift].map ?? null,
     field, oat: rows[roll].oat ?? null,
     method,
   };
 }
 
+function detectLanding(rows){
+  const n = rows.length;
+  if (n < 20) return null;
+  const gs = i => rows[i].gndSpd;
+
+  // 1) Letzte anhaltende Flugphase, danach das Ausrollen auf Rollgeschwindigkeit.
+  const last = sustainedAir(rows, -1);
+  if (last < 0) return null;
+  let slow = -1;
+  for (let i = last + 1; i < n && rows[i].sec - rows[last].sec <= WIN_S + 300; i++)
+    if (gs(i) != null && gs(i) <= TAXI_KT){ slow = i; break; }
+  if (slow < 0) return null;                      // Log endet vor dem Ausrollen
+
+  // 2) Platzhöhe aus dem Ausrollen und den ersten Rollsekunden danach.
+  let endIdx = slow;
+  while (endIdx < n - 1 && rows[endIdx+1].sec - rows[slow].sec <= 15) endIdx++;
+  let startIdx = slow;
+  while (startIdx > 0 && rows[slow].sec - rows[startIdx-1].sec <= 60) startIdx--;
+  const field = fieldElev(rows, startIdx, endIdx);
+  if (field == null) return null;
+
+  // 3) Endanflug: letzter Punkt vor dem Ausrollen mehr als 50 ft über Platz.
+  let fin = -1;
+  for (let i = slow; i >= 0 && rows[slow].sec - rows[i].sec <= WIN_S + 300; i--){
+    const a = altOf(rows[i]);
+    if (a != null && a - field >= 50){ fin = i; break; }
+  }
+  if (fin < 0 || fin >= slow - 1) return null;
+
+  // 4) Aufsetzen: vom Ausrollen aus zurück, solange das Flugzeug am Boden ist
+  //    (nahe Platzhöhe und kein nennenswertes Sinken mehr).
+  let td = slow;
+  while (td > fin + 1){
+    const a = altOf(rows[td-1]), v = vsOf(rows, td-1, +1);
+    if (a != null && a - field <= 10 && (v == null || v > -120)) td--; else break;
+  }
+
+  const tdT = crossingTime(rows, td, field, -1);
+  // 50 ft über Platz im Endanflug (linear zwischen fin und fin+1)
+  const hA = altOf(rows[fin]) - field, hB = altOf(rows[fin+1]);
+  const f50 = hB == null ? 0 : Math.min(1, Math.max(0, (hA - 50) / Math.max(1e-6, hA - (hB - field))));
+  const t50 = Math.min(tdT, rows[fin].sec + f50 * (rows[fin+1].sec - rows[fin].sec));
+  // Ende des Ausrollens: Groundspeed fällt auf 10 kt (linear interpoliert)
+  const g0 = gs(slow-1), g1 = gs(slow);
+  const fS = (g0 == null || g0 <= g1) ? 1 : Math.min(1, Math.max(0, (g0 - TAXI_KT) / (g0 - g1)));
+  const stopT = Math.max(tdT, rows[slow-1].sec + fS * (rows[slow].sec - rows[slow-1].sec));
+
+  const dur = stopT - tdT;
+  const tdGs = valAt(rows, tdT, "gndSpd");
+  if (dur < 2 || dur > 120) return null;
+  if (tdGs == null || tdGs < 20) return null;
+  const distRoll = integrateGs(rows, tdT, stopT);
+  const dist50   = integrateGs(rows, t50, stopT);
+  if (!(distRoll > 20)) return null;
+
+  const offMin = utcOffsetMin(rows);
+  const cT = clockAt(tdT, offMin), cS = clockAt(stopT, offMin), c50 = clockAt(t50, offMin);
+  return {
+    sec50: t50, str50: c50.str, utc50: c50.utc,
+    tdSec: tdT, tdStr: cT.str, tdUtc: cT.utc,
+    stopSec: stopT, stopStr: cS.str, stopUtc: cS.utc,
+    dur, dur50: stopT - t50,
+    distRoll, dist50,
+    tdGs, tdIas: valAt(rows, tdT, "ias"),
+    gs50: valAt(rows, t50, "gndSpd"), ias50: valAt(rows, t50, "ias"),
+    field, oat: rows[slow].oat ?? null,
+  };
+}
+
 /* Kurzzusammenfassung eines Flugs für die Zeitleiste.
    Version hochzählen, wenn sich die Struktur ändert -> gespeicherte
    Zusammenfassungen werden dann automatisch neu berechnet. */
-const SUMMARY_VER = 4;
+const SUMMARY_VER = 6;
 function summarize(parsed){
   const rows = parsed.rows;
   const t0 = rows[0], t1 = rows[rows.length-1];
@@ -458,6 +623,9 @@ function summarize(parsed){
   }
 
   const offMin = utcOffsetMin(rows);
+  const takeoff = type === "flight" ? detectTakeoff(rows) : null;
+  const landing = type === "flight" ? detectLanding(rows) : null;
+  const airTime = takeoff && landing && landing.tdSec > takeoff.liftSec ? landing.tdSec - takeoff.liftSec : null;
 
   return {
     ver: SUMMARY_VER,
@@ -467,7 +635,7 @@ function summarize(parsed){
     startTs: Date.parse(t0.date + "T" + t0.timeStr) || 0,
     dur: t1.sec - t0.sec,
     runSecs, engStart, engEnd, type, trackLL,
-    takeoff: type === "flight" ? detectTakeoff(rows) : null,
+    takeoff, landing, airTime,
     dist,
     maxAlt: g("alt")?.max ?? null, maxIas: g("ias")?.max ?? null,
     maxRpm: g("rpm")?.max ?? null, maxOilT: g("oilT")?.max ?? null,
@@ -507,7 +675,7 @@ function fmtDateDE(iso){
 return {
   F2C, GAL2L, LIMITS, TYPE_META, SUMMARY_VER,
   parseG3X, zoneOf, stats, episodes, allEpisodes, computeTrack, summarize,
-  utcOffsetMin, utcOf, offsetStr, clockStr, detectTakeoff,
+  utcOffsetMin, utcOf, offsetStr, clockStr, detectTakeoff, detectLanding, integrateGs, valAt,
   fmtDur, fmtNum, fmtDist, fmtDateDE,
 };
 });

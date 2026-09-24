@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { createBackend } from "./server.mjs";
-import { makeTakeoffCsv, expectedRollMetres } from "../test/takeoff-fixture.mjs";
+import { makeTakeoffCsv, expectedRollMetres, expectedLandingRollMetres, touchdownSecond } from "../test/takeoff-fixture.mjs";
 
 const core = createRequire(import.meta.url)("../core/g3x-core.cjs");
 
@@ -91,7 +91,7 @@ const c2 = await jq("/api/rescan", { method: "POST" });
 ok(c2.counts.new === 0, `frisch extern abgelegte Datei wartet Ruhephase ab (${JSON.stringify(c2.counts)})`);
 await beQ.close();
 
-// ---- UTC-Zeiten und Startstrecke ----
+// ---- UTC-Zeiten, Start und Landung ----
 const folderT = path.join(tmp, "Start");
 const stateT = path.join(tmp, "appdataT", "idx.json");
 await fs.mkdir(folderT, { recursive: true });
@@ -110,14 +110,65 @@ ok(!!tk, "Startlauf erkannt");
 ok(tk && Math.abs(tk.distRoll - expM) / expM < 0.05,
   `Startrollstrecke ${tk ? tk.distRoll.toFixed(0) : "–"} m, erwartet ${expM.toFixed(0)} m (< 5 % Abweichung)`);
 ok(tk && tk.dist50 > tk.distRoll, "Strecke bis 50 ft ist länger als die Rollstrecke");
-ok(tk && tk.rollUtc === "09:35:40" && tk.liftStr > tk.rollStr,
+ok(tk && tk.rollUtc === "09:35:39" && tk.liftUtc === "09:35:57" && tk.liftStr > tk.rollStr,
   `Losrollen ${tk ? tk.rollStr : "–"} lokal / ${tk ? tk.rollUtc : "–"} UTC, Abheben ${tk ? tk.liftStr : "–"}`);
 ok(tk && tk.liftGs >= 45 && tk.liftGs <= 55, `Abhebegeschwindigkeit ${tk ? tk.liftGs : "–"} kt`);
 
+const ld = sT.landing;
+const expL = expectedLandingRollMetres();
+ok(!!ld, "Landung erkannt");
+ok(ld && ld.tdUtc === "09:45:57" && ld.tdStr === "11:45:57",
+  `Aufsetzen ${ld ? ld.tdStr : "–"} lokal / ${ld ? ld.tdUtc : "–"} UTC (erwartet 11:45:57 / 09:45:57)`);
+ok(ld && Math.abs(ld.distRoll - expL) / expL < 0.05,
+  `Landerollstrecke ${ld ? ld.distRoll.toFixed(0) : "–"} m, erwartet ${expL.toFixed(0)} m (< 5 % Abweichung)`);
+ok(ld && ld.dist50 > ld.distRoll && ld.tdGs >= 50 && ld.tdGs <= 60,
+  `Landestrecke über 50 ft ${ld ? ld.dist50.toFixed(0) : "–"} m, Aufsetzgeschwindigkeit ${ld ? ld.tdGs.toFixed(0) : "–"} kt`);
+ok(sT.airTime === 600, `Flugzeit Abheben–Aufsetzen ${sT.airTime} s (erwartet 600 s)`);
+
+// Rollender Start (30 s Rollen mit 8 kt direkt auf die Piste): das Rollen davor
+// darf NICHT zur Startrollstrecke zählen.
+const rollO = { taxiS: 30 };
+const tkR = core.summarize(core.parseG3X(makeTakeoffCsv(rollO))).takeoff;
+const expR = expectedRollMetres(rollO);
+ok(tkR && tkR.method === "rolling" && Math.abs(tkR.distRoll - expR) / expR < 0.05 && Math.abs(tkR.dur - 18) < 1,
+  `rollender Start: ${tkR ? tkR.distRoll.toFixed(0) : "–"} m in ${tkR ? tkR.dur.toFixed(1) : "–"} s, erwartet ${expR.toFixed(0)} m in 18 s (${tkR ? tkR.method : "–"})`);
+
+// Realistisches Messrauschen (Baro ±5 ft, GS ±0,4 kt, Vario ±60 ft/min) und
+// Staudruckfehler im Startlauf: Ergebnisse bleiben innerhalb einer Messsekunde.
+let worstTo = 0, worstLd = 0, worstTd = 0, missing = 0;
+for (let seed = 1; seed <= 30; seed++){
+  const o = { noise: seed, dipFt: 15, taxiS: seed % 2 ? 0 : 20 };
+  const p = core.parseG3X(makeTakeoffCsv(o));
+  const sN = core.summarize(p);
+  if (!sN.takeoff || !sN.landing){ missing++; continue; }
+  worstTo = Math.max(worstTo, Math.abs(sN.takeoff.distRoll / expectedRollMetres(o) - 1));
+  worstLd = Math.max(worstLd, Math.abs(sN.landing.distRoll / expectedLandingRollMetres(o) - 1));
+  worstTd = Math.max(worstTd, Math.abs(sN.landing.tdSec - p.rows[0].sec - touchdownSecond(o)));
+}
+ok(missing === 0 && worstTo < 0.08 && worstLd < 0.12 && worstTd <= 1,
+  `mit Rauschen: Start ${(worstTo*100).toFixed(1)} %, Landung ${(worstLd*100).toFixed(1)} %, Aufsetzzeit ±${worstTd.toFixed(1)} s (${missing} nicht erkannt)`);
+
 // Ein Standlauf darf KEINE Startstrecke liefern (sonst wäre die Erkennung zu gierig)
 const groundSummary = core.summarize(core.parseG3X(sample.toString("utf8")));
-ok(groundSummary.takeoff == null, "Standlauf liefert keine Startstrecke");
+ok(groundSummary.takeoff == null && groundSummary.landing == null, "Standlauf liefert weder Start noch Landung");
 ok(groundSummary.startUtc === "09:35:01", `UTC auch im echten Beispiel-Log (${groundSummary.startUtc})`);
+
+// ---- Grenzwert-Episoden: keine Flut kurzer Einträge, Startleistung erlaubt ----
+{
+  const mk = (fn) => Array.from({ length: 1200 }, (_, t) => ({ sec: t, timeStr: core.clockStr(t), ias: t > 60 ? 80 : 0, ...fn(t) }));
+  const base = t => ({ rpm: t < 60 ? 1900 : t < 340 ? 5700 : 5000, map: t >= 60 && t < 340 ? 48 : 40,
+                       oilT: 95, oilP: t < 60 ? 20 : 50 });
+  let eps = core.allEpisodes(mk(base));
+  ok(eps.length === 0, `Startleistung 4:40 min + Öldruck im Leerlauf -> keine Meldung (${eps.length})`);
+  eps = core.allEpisodes(mk(t => ({ ...base(t), rpm: t === 100 || t === 101 ? 5820 : base(t).rpm })));
+  ok(eps.length === 0, "2-s-Überschwinger über 5800 rpm beim Start -> keine Meldung");
+  eps = core.allEpisodes(mk(t => ({ ...base(t), rpm: t >= 60 && t < 420 ? 5700 : base(t).rpm })));
+  ok(eps.length === 1 && eps[0].key === "rpm" && eps[0].sev === "warn", "6 min Startleistung -> genau eine gelbe Meldung");
+  eps = core.allEpisodes(mk(t => ({ ...base(t), oilT: t > 600 && t < 900 ? (t % 4 < 2 ? 111 : 109) : 95 })));
+  ok(eps.length === 1 && eps[0].n > 50, `um 110 °C pendelnde Öltemperatur -> ein Eintrag (${eps.length}, ${eps[0]?.n}×)`);
+  eps = core.allEpisodes(mk(t => ({ ...base(t), coolT: t >= 700 && t < 705 ? 125 : 90 })));
+  ok(eps.length === 1 && eps[0].sev === "crit" && eps[0].secs === 5, "5 s Kühlmittel über 120 °C -> rot");
+}
 
 // Veraltete Zusammenfassung wird beim Scan neu berechnet (ohne Dateiänderung)
 await beT.close();
@@ -127,7 +178,7 @@ idx.flights[onlyId].summary = { ...idx.flights[onlyId].summary, ver: 1, takeoff:
 await fs.writeFile(stateT, JSON.stringify(idx));
 const beT2 = await createBackend({ dataDir: folderT, stateFile: stateT, quietMs: 0, scanIntervalMs: 999999 });
 const reS = (await (await fetch(beT2.url + "/api/flights")).json()).flights[0].summary;
-ok(reS.ver === core.SUMMARY_VER && reS.takeoff && reS.startUtc === "09:35:00",
+ok(reS.ver === core.SUMMARY_VER && reS.takeoff && reS.landing && reS.startUtc === "09:35:00",
   `alte Zusammenfassung (v1) wurde automatisch neu berechnet (jetzt v${reS.ver})`);
 await beT2.close();
 

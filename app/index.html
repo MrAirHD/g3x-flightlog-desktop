@@ -69,6 +69,8 @@ ul.warnlist .ic{flex:none}
 .legend span{display:inline-flex;align-items:center;gap:6px}
 .legend i{width:14px;height:3px;border-radius:2px;display:inline-block}
 .zonenote{font-size:12px;color:var(--muted);margin-top:6px}
+.phase-h{font-size:14px;margin:18px 0 8px;color:var(--ink2);border-top:1px solid var(--border);padding-top:14px}
+.phasechart{margin-top:10px}
 .chartbox{position:relative}
 .chartbox svg{display:block;width:100%;height:auto}
 .tip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--border);
@@ -309,8 +311,18 @@ button.btn.primary:hover{color:#fff;filter:brightness(1.05)}
       <div class="tiles" id="tiles"></div>
     </div>
     <div class="card" id="takeoffCard" style="display:none">
-      <h2 id="takeoffTitle">Start</h2>
-      <div class="tiles" id="takeoffTiles"></div>
+      <h2 id="takeoffTitle">Start &amp; Landung</h2>
+      <div class="tiles" id="phaseTimes"></div>
+      <div id="takeoffPart">
+        <h3 class="phase-h" id="takeoffH">Start</h3>
+        <div class="tiles" id="takeoffTiles"></div>
+        <div id="takeoffChart"></div>
+      </div>
+      <div id="landingPart">
+        <h3 class="phase-h" id="landingH">Landung</h3>
+        <div class="tiles" id="landingTiles"></div>
+        <div id="landingChart"></div>
+      </div>
       <div class="zonenote" id="takeoffNote"></div>
     </div>
     <div class="card">
@@ -348,10 +360,13 @@ const cfg = { lang: "de", units: { temp:"C", press:"psi", map:"inHg", alt:"ft", 
 /* Langtexte, die an zwei Stellen gebraucht werden (Wörterbuch-Schlüssel und
    Verwendung) — als Konstante, damit beide nie auseinanderlaufen. */
 const TAKEOFF_NOTE =
-  "Abheben = Zeitpunkt, an dem die Höhe die Platzhöhe verlässt (aus den ersten Steigflugsekunden zurückgerechnet). " +
-  "Die Strecke ist das Integral der GPS-Groundspeed über die Zeit, also die tatsächliche Strecke über Grund — " +
-  "inklusive Wind und Pistenneigung. Bei 1 Hz Aufzeichnung ist mit einigen Prozent Unsicherheit zu rechnen; " +
-  "als Startleistungsnachweis im Sinne des Flughandbuchs taugt der Wert nicht. Enthält ein Log mehrere Starts (Platzrunde, Touch&Go), wird der erste ausgewertet.";
+  "Abheben = Beginn des Steigflugs, Aufsetzen = Ende des Sinkflugs auf Platzhöhe — beides aus Vario, " +
+  "GPS-Vertikalgeschwindigkeit und Höhe erkannt. Die Strecken sind das Integral der GPS-Groundspeed über die Zeit, " +
+  "also die tatsächliche Strecke über Grund — inklusive Wind und Pistenneigung. Die Landerollstrecke endet, sobald " +
+  "die Groundspeed auf 10 kt (Rollgeschwindigkeit) gefallen ist. Bei 1 Hz Aufzeichnung ist mit rund einer Sekunde " +
+  "bzw. einigen Prozent Unsicherheit zu rechnen (langes Ausschweben lässt das erkannte Aufsetzen etwas früher liegen); " +
+  "als Leistungsnachweis im Sinne des Flughandbuchs taugen die Werte nicht. Enthält ein Log mehrere Starts und " +
+  "Landungen (Platzrunden, Touch&Go), werden der erste Start und die letzte Landung ausgewertet.";
 
 /* ---- Übersetzung: Schlüssel = deutscher Text ---- */
 const DICT = {
@@ -441,15 +456,26 @@ const DICT = {
   "Dauer des Startlaufs": "Ground-roll time", "Abhebegeschwindigkeit": "Liftoff speed",
   "Losrollen": "Start of roll", "Abheben": "Liftoff", "Platzhöhe": "Field elevation",
   "Ø Startrollstrecke": "Avg. ground roll",
+  "Start & Landung": "Takeoff & landing", "Startzeit (Abheben)": "Takeoff time (liftoff)",
+  "Landezeit (Aufsetzen)": "Landing time (touchdown)", "Flugzeit": "Flight time",
+  "Abheben bis Aufsetzen": "liftoff to touchdown", "Aufsetzen": "Touchdown", "Landung": "Landing",
+  "Landerollstrecke": "Landing roll", "Landestrecke über 50 ft": "Landing distance from 50 ft",
+  "Dauer des Ausrollens": "Landing-roll time", "Aufsetzgeschwindigkeit": "Touchdown speed",
+  "Anfluggeschwindigkeit (50 ft)": "Approach speed (50 ft)", "Ausgerollt (10 kt)": "Rolled out (10 kt)",
+  "Höhe über Platz": "Height above field", "Startverlauf": "Takeoff profile", "Landeverlauf": "Landing profile",
+  "Strecke über Grund": "Distance over ground",
   "Rollbeginn = letzter Messpunkt im Stand (Bremsen lösen).":
     "Start of roll = last sample at a standstill (brake release).",
-  "Rollbeginn = Übergang auf Startleistung (das Flugzeug stand nie ganz still).":
-    "Start of roll = transition to takeoff power (the aircraft never came to a full stop).",
+  "Rollbeginn = Beginn der Beschleunigung (rollender Start — das Rollen davor zählt nicht mit).":
+    "Start of roll = start of acceleration (rolling takeoff — taxiing before it does not count).",
   [TAKEOFF_NOTE]:
-    "Liftoff = the moment the altitude leaves field elevation (extrapolated back from the first seconds of climb). " +
-    "The distance is the integral of GPS groundspeed over time, i.e. the actual distance over the ground — " +
-    "wind and runway slope included. At 1 Hz logging expect an uncertainty of a few per cent; this is not a " +
-    "substitute for the takeoff performance figures in the aircraft flight manual. If a log contains several takeoffs (circuits, touch-and-go), the first one is evaluated.",
+    "Liftoff = start of the climb, touchdown = end of the descent at field elevation — both detected from the " +
+    "vertical speed (ADAHRS and GPS) and altitude. Distances are the integral of GPS groundspeed over time, " +
+    "i.e. the actual distance over the ground — wind and runway slope included. The landing roll ends when " +
+    "groundspeed has dropped to 10 kt (taxi speed). At 1 Hz logging expect about one second or a few per cent " +
+    "of uncertainty (a long float makes the detected touchdown a little early); this is not a substitute for the " +
+    "performance figures in the aircraft flight manual. If a log contains several takeoffs and landings " +
+    "(circuits, touch-and-go), the first takeoff and the last landing are evaluated.",
   "Keine CSV ausgewählt": "No CSV selected", "Bitte G3X-Logdateien (.csv) wählen.": "Please choose G3X log files (.csv).",
   "Upload fehlgeschlagen": "Upload failed", "Scan fehlgeschlagen": "Scan failed",
   "Flug konnte nicht geladen werden": "Could not load flight", "Löschen fehlgeschlagen": "Delete failed",
@@ -504,8 +530,8 @@ const fmtV = (key, v, base) => nf(convV(key, v), decOf(key, base));
 
 /* Englische Labels/Notes zu den Rotax-Grenzwerten (Core bleibt deutsch) */
 const LIMIT_EN = {
-  rpm:{label:"RPM", note:"max. 5800 rpm (up to 5 min), continuous 5500 rpm, idle min. 1800 rpm"},
-  map:{label:"Manifold pressure", note:"max. 51 inHg (1730 hPa); target at takeoff ≈ 44.9 inHg (1520 hPa) — caution zone derived"},
+  rpm:{label:"RPM", note:"max. 5800 rpm (up to 5 min), continuous 5500 rpm, idle min. 1800 rpm — 5500–5800 rpm (takeoff power) is only reported after 5 min"},
+  map:{label:"Manifold pressure", note:"max. 51 inHg (1730 hPa); target at takeoff ≈ 44.9 inHg (1520 hPa) — caution zone derived, reported like takeoff power only after 5 min"},
   oilT:{label:"Oil temperature", note:"operation 50–130 °C, recommended 90–110 °C; take off only above 50 °C"},
   coolT:{label:"Coolant temperature", note:"max. 120 °C; caution zone from 108 °C derived"},
   manT:{label:"Intake-air temperature", note:"max. 80 °C; above 50 °C reduced critical altitude"},
@@ -950,6 +976,8 @@ function renderOverview(){
       ? `<span>${T("nur Avionik, Motor lief nicht")}</span>`
       : `<span><b>${fmtDur(s.runSecs)}</b> ${T("Motor")}</span>` +
         (flightish ? `<span><b>${fmtDist(s.dist)}</b></span><span>max <b>${fmtV("alt",s.maxAlt,0)} ${unitOf("alt")}</b></span>` : "") +
+        (flightish && s.takeoff?.liftUtc ? `<span title="${T("Startzeit (Abheben)")}">🛫 <b>${esc(s.takeoff.liftUtc.slice(0,5))}Z</b></span>` : "") +
+        (flightish && s.landing?.tdUtc ? `<span title="${T("Landezeit (Aufsetzen)")}">🛬 <b>${esc(s.landing.tdUtc.slice(0,5))}Z</b></span>` : "") +
         (flightish && s.takeoff ? `<span>${T("Startlauf")} <b>${fmtRunway(s.takeoff.distRoll)}</b></span>` : "") +
         `<span>max <b>${nf(s.maxRpm,0)} rpm</b></span><span>${cfg.lang==="en"?"Oil":"Öl"} <b>${fmtV("oilT",s.maxOilT,1)} ${unitOf("oilT")}</b></span>`;
     li.innerHTML = `
@@ -1047,43 +1075,237 @@ const CURATED = [
   ["Navigation & Autopilot","Höhenrudertrimmung","",2,[["Elevator Trim","Trimmung","var(--s1)"]]],
 ];
 
-/* ---------- Start: Rollstrecke & Abheben ---------- */
+/* ---------- Start & Landung ---------- */
 /* Strecken beim Start immer in Metern MIT Fuß daneben — Pistenlängen stehen in
    der AIP je nach Land in der einen oder anderen Einheit. */
 const fmtRunway = m => m == null ? "–" : `${nf(Math.round(m), 0)} m`;
 const fmtRunwayFt = m => m == null ? "" : `${nf(Math.round(m / 0.3048), 0)} ft`;
 
-function renderTakeoff(tk){
-  const card = $("#takeoffCard");
-  if (!tk){ card.style.display = "none"; return; }
-  card.style.display = "";
-  $("#takeoffTitle").textContent = T("Startlauf");
-
+/* Uhrzeit fürs Flugbuch: UTC groß, Lokalzeit klein darunter. Ohne UTC-Angabe
+   im Log bleibt nur die Lokalzeit. */
+function clockTile(name, local, utc, hero){
   const en = cfg.lang === "en";
+  return utc
+    ? [name, `${utc} <span class="unit">UTC</span>`, `${local} ${en ? "local" : "lokal"}`, hero]
+    : [name, local, en ? "local time" : "Lokalzeit", hero];
+}
+function speedVal(ias, gs){
   const spdU = unitOf("ias");
-  const tiles = [
-    [T("Startrollstrecke"), fmtRunway(tk.distRoll), fmtRunwayFt(tk.distRoll), true],
-    [T("Startstrecke über 50 ft"), fmtRunway(tk.dist50), fmtRunwayFt(tk.dist50), false],
-    [T("Dauer des Startlaufs"), fmtDur(tk.dur),
-      `${en?"to 50 ft":"bis 50 ft"} ${fmtDur(tk.dur50)}`, false],
-    [T("Abhebegeschwindigkeit"),
-      tk.liftIas != null ? `${fmtV("ias", tk.liftIas, 0)} <span class="unit">${spdU} IAS</span>`
-                         : `${fmtV("gndSpd", tk.liftGs, 0)} <span class="unit">${spdU} GS</span>`,
-      tk.liftIas != null ? `GS ${fmtV("gndSpd", tk.liftGs, 0)} ${spdU}` : "", false],
-    [T("Losrollen"), tk.rollStr, tk.rollUtc ? `${tk.rollUtc} UTC` : "", false],
-    [T("Abheben"), tk.liftStr, tk.liftUtc ? `${tk.liftUtc} UTC` : "", false],
-    [T("Platzhöhe"), `${fmtV("alt", tk.field, 0)} <span class="unit">${unitOf("alt")}</span>`,
-      tk.oat != null ? `OAT ${fmtV("oat", tk.oat, 0)} ${unitOf("oat")}` : "", false],
-  ];
-  $("#takeoffTiles").innerHTML = tiles.map(([name, val, sub, hero]) =>
-    `<div class="tile"><div class="name">${esc(name)}</div>
-      <div class="val"${hero ? ' style="color:var(--s1)"' : ""}>${val}</div>
-      <div class="mm">${esc(sub)}</div></div>`).join("");
+  return ias != null && ias > 20
+    ? [`${fmtV("ias", ias, 0)} <span class="unit">${spdU} IAS</span>`, gs != null ? `GS ${fmtV("gndSpd", gs, 0)} ${spdU}` : ""]
+    : [`${fmtV("gndSpd", gs, 0)} <span class="unit">${spdU} GS</span>`, ""];
+}
+const tileHtml = tiles => tiles.map(([name, val, sub, hero]) =>
+  `<div class="tile"><div class="name">${esc(name)}</div>
+    <div class="val"${hero ? ' style="color:var(--s1)"' : ""}>${val}</div>
+    <div class="mm">${esc(sub)}</div></div>`).join("");
 
-  const how = tk.method === "brakerelease"
+function renderPhases(rows){
+  const tk = detectTakeoff(rows), ld = detectLanding(rows);
+  const card = $("#takeoffCard");
+  if (!tk && !ld){ card.style.display = "none"; return; }
+  card.style.display = "";
+  const en = cfg.lang === "en";
+  $("#takeoffTitle").textContent = T("Start & Landung");
+  const offMin = utcOffsetMin(rows);
+
+  // Kopfzeile: die Flugbuch-Zeiten
+  const times = [];
+  if (tk) times.push(clockTile(T("Startzeit (Abheben)"), tk.liftStr, tk.liftUtc, true));
+  if (ld) times.push(clockTile(T("Landezeit (Aufsetzen)"), ld.tdStr, ld.tdUtc, true));
+  if (tk && ld && ld.tdSec > tk.liftSec)
+    times.push([T("Flugzeit"), fmtDur(ld.tdSec - tk.liftSec), T("Abheben bis Aufsetzen"), false]);
+  $("#phaseTimes").innerHTML = tileHtml(times);
+
+  // Start
+  $("#takeoffPart").style.display = tk ? "" : "none";
+  if (tk){
+    $("#takeoffH").textContent = en ? "Takeoff" : "Start";
+    const [sv, ss] = speedVal(tk.liftIas, tk.liftGs);
+    $("#takeoffTiles").innerHTML = tileHtml([
+      [T("Startrollstrecke"), fmtRunway(tk.distRoll), fmtRunwayFt(tk.distRoll), true],
+      [T("Startstrecke über 50 ft"), fmtRunway(tk.dist50), fmtRunwayFt(tk.dist50), false],
+      [T("Dauer des Startlaufs"), fmtDur(tk.dur), `${en ? "to 50 ft" : "bis 50 ft"} ${fmtDur(tk.dur50)}`, false],
+      [T("Abhebegeschwindigkeit"), sv, ss, false],
+      clockTile(T("Losrollen"), tk.rollStr, tk.rollUtc, false),
+      [T("Platzhöhe"), `${fmtV("alt", tk.field, 0)} <span class="unit">${unitOf("alt")}</span>`,
+        tk.oat != null ? `OAT ${fmtV("oat", tk.oat, 0)} ${unitOf("oat")}` : "", false],
+    ]);
+    const box = $("#takeoffChart"); box.innerHTML = "";
+    const ch = phaseChart(rows, T("Startverlauf"), tk.rollSec - 10, tk.sec50 + 20, tk.rollSec, tk.field, offMin, [
+      { t: tk.rollSec, label: T("Losrollen") },
+      { t: tk.liftSec, label: T("Abheben") },
+      { t: tk.sec50,   label: "50 ft" },
+    ], en ? "0 m = start of roll" : "0 m = Losrollen");
+    if (ch) box.appendChild(ch);
+  }
+
+  // Landung
+  $("#landingPart").style.display = ld ? "" : "none";
+  if (ld){
+    $("#landingH").textContent = T("Landung");
+    const [sv, ss] = speedVal(ld.tdIas, ld.tdGs);
+    const [av, as] = speedVal(ld.ias50, ld.gs50);
+    $("#landingTiles").innerHTML = tileHtml([
+      [T("Landerollstrecke"), fmtRunway(ld.distRoll), `${fmtRunwayFt(ld.distRoll)} · ${en ? "to 10 kt" : "bis 10 kt"}`, true],
+      [T("Landestrecke über 50 ft"), fmtRunway(ld.dist50), fmtRunwayFt(ld.dist50), false],
+      [T("Dauer des Ausrollens"), fmtDur(ld.dur), `${en ? "from 50 ft" : "ab 50 ft"} ${fmtDur(ld.dur50)}`, false],
+      [T("Aufsetzgeschwindigkeit"), sv, ss, false],
+      [T("Anfluggeschwindigkeit (50 ft)"), av, as, false],
+      clockTile(T("Ausgerollt (10 kt)"), ld.stopStr, ld.stopUtc, false),
+      [T("Platzhöhe"), `${fmtV("alt", ld.field, 0)} <span class="unit">${unitOf("alt")}</span>`,
+        ld.oat != null ? `OAT ${fmtV("oat", ld.oat, 0)} ${unitOf("oat")}` : "", false],
+    ]);
+    const box = $("#landingChart"); box.innerHTML = "";
+    const ch = phaseChart(rows, T("Landeverlauf"), ld.sec50 - 20, ld.stopSec + 10, ld.sec50, ld.field, offMin, [
+      { t: ld.sec50,  label: "50 ft" },
+      { t: ld.tdSec,  label: T("Aufsetzen") },
+      { t: ld.stopSec, label: "10 kt" },
+    ], en ? "0 m = 50 ft above field on final" : "0 m = 50 ft über Platz im Endanflug");
+    if (ch) box.appendChild(ch);
+  }
+
+  const how = !tk ? "" : tk.method === "brakerelease"
     ? T("Rollbeginn = letzter Messpunkt im Stand (Bremsen lösen).")
-    : T("Rollbeginn = Übergang auf Startleistung (das Flugzeug stand nie ganz still).");
-  $("#takeoffNote").textContent = how + " " + T(TAKEOFF_NOTE);
+    : T("Rollbeginn = Beginn der Beschleunigung (rollender Start — das Rollen davor zählt nicht mit).");
+  $("#takeoffNote").textContent = (how ? how + " " : "") + T(TAKEOFF_NOTE);
+}
+
+/* Start-/Landeverlauf: Geschwindigkeit (links) und Höhe über Platz (rechts)
+   über der Strecke über Grund; senkrechte Marken für die Ereignisse. */
+function phaseChart(allRows, title, tA, tB, tZero, field, offMin, markers, zeroNote){
+  const rows = allRows.filter(r => r.sec >= tA && r.sec <= tB);
+  if (rows.length < 3) return null;
+  const en = cfg.lang === "en";
+
+  // Strecke über Grund je Messpunkt (Trapezregel), 0 bei tZero
+  const cum = [0];
+  for (let i = 1; i < rows.length; i++){
+    const a = rows[i-1], b = rows[i], dt = b.sec - a.sec;
+    const ok = dt > 0 && dt <= 5 && a.gndSpd != null && b.gndSpd != null;
+    cum.push(cum[i-1] + (ok ? (a.gndSpd + b.gndSpd) / 2 * 0.514444 * dt : 0));
+  }
+  const cumAt = t => {
+    if (t <= rows[0].sec) return cum[0];
+    for (let i = 1; i < rows.length; i++) if (rows[i].sec >= t){
+      const f = (t - rows[i-1].sec) / Math.max(1e-9, rows[i].sec - rows[i-1].sec);
+      return cum[i-1] + (cum[i] - cum[i-1]) * f;
+    }
+    return cum[cum.length-1];
+  };
+  const z = cumAt(tZero);
+  const dist = cum.map(c => c - z);
+  const hOf = r => { const h = r.alt ?? r.gpsAlt; return h == null ? null : h - field; };
+
+  const card = document.createElement("div");
+  card.className = "phasechart";
+  const W = 1100, H = 280, padL = 52, padR = 58, padT = 34, padB = 30;
+  const x0 = dist[0], x1 = dist[dist.length-1];
+  if (!(x1 > x0)) return null;
+  const X = d => padL + (d - x0) / (x1 - x0) * (W - padL - padR);
+
+  // Geschwindigkeit (links)
+  let sHi = 0;
+  for (const r of rows){ sHi = Math.max(sHi, convV("gndSpd", r.gndSpd ?? 0)); if (r.ias != null) sHi = Math.max(sHi, convV("ias", r.ias)); }
+  sHi = Math.max(10, sHi * 1.1);
+  const YS = v => padT + (sHi - v) / sHi * (H - padT - padB);
+  // Höhe über Platz (rechts)
+  let hLo = 0, hHi = 20;
+  for (const r of rows){ const h = hOf(r); if (h != null){ hLo = Math.min(hLo, convV("alt", h)); hHi = Math.max(hHi, convV("alt", h)); } }
+  hHi += (hHi - hLo) * .1; hLo -= (hHi - hLo) * .05;
+  const YH = v => padT + (hHi - v) / (hHi - hLo) * (H - padT - padB);
+
+  const svg = document.createElementNS(svgNS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const el = (tag, attrs, text) => {
+    const e = document.createElementNS(svgNS, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    if (text != null) e.textContent = text;
+    svg.appendChild(e); return e;
+  };
+  for (const tv of niceTicks(0, sHi, 5)){
+    el("line", { x1:padL, x2:W-padR, y1:YS(tv), y2:YS(tv), stroke:"var(--grid)", "stroke-width":1 });
+    el("text", { x:padL-8, y:YS(tv)+4, "text-anchor":"end", "font-size":11, fill:"var(--s1)" }, nf(tv, 0));
+  }
+  for (const tv of niceTicks(hLo, hHi, 5))
+    el("text", { x:W-padR+8, y:YH(tv)+4, "text-anchor":"start", "font-size":11, fill:"var(--s5)" }, nf(tv, 0));
+  for (const tv of niceTicks(x0, x1, 8))
+    el("text", { x:X(tv), y:H-10, "text-anchor":"middle", "font-size":11, fill:"var(--muted)" }, nf(tv, 0) + " m");
+  el("line", { x1:padL, x2:W-padR, y1:H-padB, y2:H-padB, stroke:"var(--axis)" });
+  el("line", { x1:padL, x2:W-padR, y1:YH(0), y2:YH(0), stroke:"var(--s5)", "stroke-dasharray":"2 4", opacity:.6 });
+
+  const series = [
+    { label:"Groundspeed (GPS)", color:"var(--s1)", y: r => r.gndSpd == null ? null : YS(convV("gndSpd", r.gndSpd)),
+      fmt: r => r.gndSpd == null ? "–" : `${fmtV("gndSpd", r.gndSpd, 0)} ${unitOf("gndSpd")}` },
+    { label:"IAS", color:"var(--s6)", y: r => r.ias == null ? null : YS(convV("ias", r.ias)),
+      fmt: r => r.ias == null ? "–" : `${fmtV("ias", r.ias, 0)} ${unitOf("ias")}` },
+    { label:"Höhe über Platz", color:"var(--s5)", y: r => hOf(r) == null ? null : YH(convV("alt", hOf(r))),
+      fmt: r => hOf(r) == null ? "–" : `${fmtV("alt", hOf(r), 0)} ${unitOf("alt")}` },
+  ].filter(sr => rows.some(r => sr.y(r) != null));
+  for (const sr of series){
+    let d = "", pen = false;
+    rows.forEach((r, i) => {
+      const y = sr.y(r);
+      if (y == null){ pen = false; return; }
+      d += (pen ? "L" : "M") + X(dist[i]).toFixed(1) + " " + y.toFixed(1);
+      pen = true;
+    });
+    el("path", { d, fill:"none", stroke:sr.color, "stroke-width":2, "stroke-linejoin":"round" });
+  }
+
+  // Ereignis-Marken, Beschriftung abwechselnd in zwei Zeilen (liegen oft dicht beieinander)
+  markers.forEach((m, k) => {
+    const dm = cumAt(m.t) - z, x = X(dm);
+    el("line", { x1:x, x2:x, y1:padT-4, y2:H-padB, stroke:"var(--ink2)", "stroke-dasharray":"4 3", opacity:.8 });
+    const lbl = `${m.label} · ${nf(Math.round(dm), 0)} m`;
+    const right = x > W - padR - 120;
+    el("text", { x: right ? x-4 : x+4, y: 12 + (k % 2) * 13, "text-anchor": right ? "end" : "start",
+                 "font-size":11, fill:"var(--ink2)" }, lbl);
+  });
+
+  const cross = el("line", { y1:padT, y2:H-padB, stroke:"var(--axis)", "stroke-dasharray":"3 3" });
+  cross.style.display = "none";
+
+  const box = document.createElement("div");
+  box.className = "chartbox";
+  box.appendChild(svg);
+  const tip = document.createElement("div");
+  tip.className = "tip"; box.appendChild(tip);
+  const head = document.createElement("div");
+  head.className = "chart-head";
+  head.innerHTML = `<h2 style="font-size:14px">${esc(title)}</h2>`;
+  card.appendChild(head);
+  card.appendChild(box);
+
+  svg.addEventListener("pointermove", ev => {
+    const pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
+    const p = pt.matrixTransform(svg.getScreenCTM().inverse());
+    if (p.x < padL || p.x > W - padR){ tip.style.display = "none"; cross.style.display = "none"; return; }
+    const d = x0 + (p.x - padL) / (W - padL - padR) * (x1 - x0);
+    let best = 0;
+    for (let i = 1; i < rows.length; i++) if (Math.abs(dist[i] - d) < Math.abs(dist[best] - d)) best = i;
+    const r = rows[best];
+    cross.setAttribute("x1", X(dist[best])); cross.setAttribute("x2", X(dist[best]));
+    cross.style.display = "";
+    const utc = utcOf(r, offMin);
+    let html = `<div class="tt">${r.timeStr}${utc ? ` · ${utc} UTC` : ""} · ${nf(Math.round(dist[best]), 0)} m</div>`;
+    for (const sr of series)
+      html += `<div class="row"><span><i style="background:${sr.color}"></i>${esc(T(sr.label))}</span><b>${sr.fmt(r)}</b></div>`;
+    tip.innerHTML = html;
+    tip.style.display = "block";
+    const bb = box.getBoundingClientRect();
+    const px = (X(dist[best]) / W) * bb.width;
+    tip.style.left = Math.min(px + 14, bb.width - tip.offsetWidth - 4) + "px";
+    tip.style.top = "10px";
+  });
+  svg.addEventListener("pointerleave", () => { tip.style.display = "none"; cross.style.display = "none"; });
+
+  const lg = document.createElement("div");
+  lg.className = "legend";
+  lg.innerHTML = series.map(sr => `<span><i style="background:${sr.color}"></i>${esc(T(sr.label))}</span>`).join("") +
+    `<span style="color:var(--muted)">x: ${esc(T("Strecke über Grund"))} (${esc(zeroNote)})</span>`;
+  card.appendChild(lg);
+  return card;
 }
 
 /* ---------- Detailbericht ---------- */
@@ -1147,7 +1369,7 @@ function renderDetail(flight){
     ` · ${en?"engine time ≈":"Motorlaufzeit ca."} ${fmtDur(s.runSecs)} · ${en?"distance":"Strecke"} ${fmtDist(s.dist)}` +
     (info.engine_hours ? ` · ${en?"engine hours per G3X":"Motorstunden lt. G3X"}: ${info.engine_hours} h` : "");
 
-  renderTakeoff(detectTakeoff(fullRows));
+  renderPhases(fullRows);
 
   const allEps = allEpisodes(rows);
   const epWorst = {};
@@ -1186,8 +1408,11 @@ function renderDetail(flight){
 
   // Warnliste
   const wl = $("#warnings");
+  const epRule = en
+    ? "Reported with the engine running: ≥ 3 s in the red or ≥ 10 s in the yellow range. A value swinging around a limit (gaps up to 30 s) counts as one entry. Takeoff power (5500–5800 rpm, 45–51 inHg) is allowed for 5 min and only reported after that; oil pressure 11.6–29 psi is normal below 3500 rpm."
+    : "Gemeldet bei laufendem Motor: ≥ 3 s im roten oder ≥ 10 s im gelben Bereich. Ein Wert, der um eine Grenze pendelt (Unterbrechungen bis 30 s), zählt als ein Eintrag. Startleistung (5500–5800 rpm, 45–51 inHg) ist 5 min zulässig und wird erst danach gemeldet; Öldruck 11,6–29 psi ist unter 3500 rpm normal.";
   if (!allEps.length){
-    wl.innerHTML = `<div class="allok"><span class="badge"><span class="dot" style="background:var(--good)"></span>${T("Alle Werte im grünen Bereich")}</span> — ${en?"no phase ≥ 3 s outside the normal ranges (engine running).":"keine Phase ≥ 3 s außerhalb der Normalbereiche (bei laufendem Motor)."}</div>`;
+    wl.innerHTML = `<div class="allok"><span class="badge"><span class="dot" style="background:var(--good)"></span>${T("Alle Werte im grünen Bereich")}</span></div><div class="zonenote">${epRule}</div>`;
   } else {
     const ul = document.createElement("ul"); ul.className = "warnlist";
     for (const ep of allEps){
@@ -1196,7 +1421,7 @@ function renderDetail(flight){
       const li = document.createElement("li");
       li.innerHTML = `<span class="t">${ep.startStr}–${ep.endStr.slice(0,8)}</span>
         <span class="ic">${STATUS_ICON[ep.sev]}</span>
-        <span><b>${esc(labelOf(ep.key))}</b> ${ep.sev === "crit" ? T("über Limit") : T("im Vorwarnbereich")} ${en?"for":"für"} ${fmtDur(ep.end-ep.start+1)} — ${en?"peak":"Spitze"} ${fmtV(key, ep.peak, L.dec)} ${unitOf(key, L.unit)}</span>`;
+        <span><b>${esc(labelOf(ep.key))}</b> ${ep.sev === "crit" ? T("über Limit") : T("im Vorwarnbereich")} ${en?"for":"für"} ${fmtDur(ep.secs)}${ep.n > 1 ? (en ? ` (${ep.n}× within ${fmtDur(ep.end-ep.start+1)})` : ` (${ep.n}× innerhalb ${fmtDur(ep.end-ep.start+1)})`) : ""} — ${en?"peak":"Spitze"} ${fmtV(key, ep.peak, L.dec)} ${unitOf(key, L.unit)}</span>`;
       ul.appendChild(li);
     }
     wl.innerHTML = ""; wl.appendChild(ul);
@@ -1206,6 +1431,7 @@ function renderDetail(flight){
       div.innerHTML = `<span class="badge" style="margin-top:10px"><span class="dot" style="background:var(--crit)"></span>${en?"Caution: RPM above 5500 for more than 5 minutes — per OM only 5 min allowed.":"Achtung: Drehzahl über 5500 rpm länger als 5 Minuten — laut OM nur max. 5 min zulässig."}</span>`;
       wl.appendChild(div);
     }
+    wl.insertAdjacentHTML("beforeend", `<div class="zonenote">${epRule}</div>`);
   }
 
   // CAS
